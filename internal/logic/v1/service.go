@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/duynhne/user-service/internal/core/domain"
-	"github.com/duynhne/user-service/middleware"
+	"github.com/duynhlab/user-service/internal/core/domain"
+	"github.com/duynhlab/user-service/middleware"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )

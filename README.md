@@ -27,7 +27,7 @@ User management microservice for profiles and account operations.
 
 ### Prerequisites
 
-- Go 1.25+
+- Go 1.26.0+
 - [golangci-lint](https://golangci-lint.run/welcome/install/) v2+
 
 ### Local Development

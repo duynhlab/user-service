@@ -1,6 +1,6 @@
-module github.com/duynhne/user-service
+module github.com/duynhlab/user-service
 
-go 1.25.7
+go 1.26.0
 
 require (
 	github.com/gin-gonic/gin v1.11.0
@@ -74,4 +74,4 @@ require (
 )
 
 // For local development with pkg
-// replace github.com/duynhne/pkg => ../pkg
+// replace github.com/duynhlab/pkg => ../pkg
