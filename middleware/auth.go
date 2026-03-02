@@ -44,6 +44,7 @@ func (c *AuthClient) GetMe(token string) (*AuthUser, error) {
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 
+	// nolint:gosec // G704: SSRF via taint analysis is mitigated since baseURL is exclusively controlled by our internal config.
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("request auth service: %w", err)

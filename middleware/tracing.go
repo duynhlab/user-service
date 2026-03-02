@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/duynhne/user-service/config"
+	"github.com/duynhlab/user-service/config"
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 	"go.opentelemetry.io/otel"
@@ -177,7 +177,7 @@ func StartSpan(ctx context.Context, name string, opts ...trace.SpanStartOption) 
 // Shutdown gracefully shuts down the tracer provider, flushing any pending spans
 // Call this in main() before application exits to ensure all traces are exported
 //
-// Usage (Go 1.25 WaitGroup.Go):
+// Usage (Go 1.26.0 WaitGroup.Go):
 //
 //	var wg sync.WaitGroup
 //	wg.Go(func() {

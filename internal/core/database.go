@@ -19,7 +19,7 @@ type DatabaseConfig struct {
 	Port           string // DB_PORT - PostgreSQL port (default: 5432)
 	Name           string // DB_NAME - Database name (e.g., "user")
 	User           string // DB_USER - Database user
-	Password       string // DB_PASSWORD - Database password
+	Password       string `json:"-"` // DB_PASSWORD - Database password
 	SSLMode        string // DB_SSLMODE - SSL mode (disable/require/verify-full)
 	MaxConnections int    // DB_POOL_MAX_CONNECTIONS - Max pool connections (default: 25)
 }
@@ -68,7 +68,8 @@ func (c *DatabaseConfig) BuildDSN() string {
 //
 // IMPORTANT: We use SimpleProtocol mode and disable statement caching to work correctly
 // with transaction-mode connection poolers (PgCat/PgBouncer). Without this, you may see:
-//   "prepared statement stmtcache_* does not exist"
+//
+//	"prepared statement stmtcache_* does not exist"
 func Connect(ctx context.Context) (*pgxpool.Pool, error) {
 	cfg, err := LoadConfig()
 	if err != nil {

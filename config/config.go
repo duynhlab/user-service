@@ -9,7 +9,7 @@
 //
 // Usage:
 //
-//	import "github.com/duynhne/user-service/config"
+//	import "github.com/duynhlab/user-service/config"
 //
 //	func main() {
 //	    cfg := config.Load()
@@ -47,7 +47,7 @@ type Config struct {
 	// This gives Kubernetes/Service routing time to stop sending new traffic.
 	// From READINESS_DRAIN_DELAY env (default: 5s, max: 30s).
 	ReadinessDrainDelay int
-	AuthServiceURL  string          // Auth service URL for token introspection - from AUTH_SERVICE_URL env
+	AuthServiceURL      string // Auth service URL for token introspection - from AUTH_SERVICE_URL env
 	// AuthAllowUnauthenticatedFallback: when true, allows requests without token to proceed with user_id="1" (demo only).
 	// When false (default), returns 401 for missing/invalid tokens. Set AUTH_ALLOW_UNAUTHENTICATED_FALLBACK=true for local/dev.
 	AuthAllowUnauthenticatedFallback bool
@@ -97,7 +97,7 @@ type DatabaseConfig struct {
 	Port           string // Database port - from DB_PORT env (default: "5432")
 	Name           string // Database name - from DB_NAME env
 	User           string // Database user - from DB_USER env
-	Password       string // Database password - from DB_PASSWORD env
+	Password       string `json:"-"` // Database password - from DB_PASSWORD env
 	SSLMode        string // SSL mode - from DB_SSLMODE env (default: "disable")
 	MaxConnections int    // Max connections - from DB_POOL_MAX_CONNECTIONS env (default: 25)
 	PoolMode       string // Pool mode - from DB_POOL_MODE env (optional)
@@ -160,10 +160,10 @@ func Load() *Config {
 			PoolMode:       getEnv("DB_POOL_MODE", ""),
 			PoolerType:     getEnv("DB_POOLER_TYPE", ""),
 		},
-		ShutdownTimeout:                   getEnvDurationSeconds("SHUTDOWN_TIMEOUT", 10),
-		ReadinessDrainDelay:               getEnvDurationSecondsWithMax("READINESS_DRAIN_DELAY", 5, 30),
-		AuthServiceURL:                    getEnv("AUTH_SERVICE_URL", "http://auth.auth.svc.cluster.local:8080"),
-		AuthAllowUnauthenticatedFallback:  getEnvBool("AUTH_ALLOW_UNAUTHENTICATED_FALLBACK", false),
+		ShutdownTimeout:                  getEnvDurationSeconds("SHUTDOWN_TIMEOUT", 10),
+		ReadinessDrainDelay:              getEnvDurationSecondsWithMax("READINESS_DRAIN_DELAY", 5, 30),
+		AuthServiceURL:                   getEnv("AUTH_SERVICE_URL", "http://auth.auth.svc.cluster.local:8080"),
+		AuthAllowUnauthenticatedFallback: getEnvBool("AUTH_ALLOW_UNAUTHENTICATED_FALLBACK", false),
 	}
 }
 
@@ -194,7 +194,7 @@ func (c *Config) validateService() []string {
 		errs = append(errs, "PORT is required (e.g., '8080')")
 	}
 	if _, err := strconv.Atoi(c.Service.Port); err != nil {
-		errs = append(errs, "PORT must be a valid number, got: " + c.Service.Port)
+		errs = append(errs, "PORT must be a valid number, got: "+c.Service.Port)
 	}
 	validEnvs := []string{"development", "dev", "staging", "stage", "production", "prod"}
 	if !contains(validEnvs, c.Service.Env) {
@@ -263,7 +263,7 @@ func (c *Config) validateDatabase() []string {
 	}
 	if c.Database.Port != "" {
 		if _, err := strconv.Atoi(c.Database.Port); err != nil {
-			errs = append(errs, "DB_PORT must be a valid number, got: " + c.Database.Port)
+			errs = append(errs, "DB_PORT must be a valid number, got: "+c.Database.Port)
 		}
 	}
 	return errs

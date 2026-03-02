@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	database "github.com/duynhne/user-service/internal/core"
-	"github.com/duynhne/user-service/internal/core/domain"
+	database "github.com/duynhlab/user-service/internal/core"
+	"github.com/duynhlab/user-service/internal/core/domain"
 	"github.com/jackc/pgx/v5"
 )
 
