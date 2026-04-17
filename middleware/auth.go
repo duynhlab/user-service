@@ -38,7 +38,7 @@ func NewAuthClient(baseURL string) *AuthClient {
 
 // GetMe retrieves user info from auth service using the token
 func (c *AuthClient) GetMe(token string) (*AuthUser, error) {
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, c.baseURL+"/api/v1/auth/me", nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, c.baseURL+"/auth/v1/private/me", nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
