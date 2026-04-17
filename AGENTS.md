@@ -138,9 +138,24 @@ go build ./... && go test ./... && golangci-lint run --timeout=10m
 
 ## 🔌 API Reference
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/v1/users/:id` | Get user by ID |
-| `GET` | `/api/v1/users/profile` | Get user profile |
-| `PUT` | `/api/v1/users/profile` | Update user profile |
-| `POST` | `/api/v1/users` | Create new user (internal) |
+### Cluster paths (what this service mounts)
+
+| Method | Cluster path | Audience | Description |
+|--------|--------------|----------|-------------|
+| `GET` | `/api/v1/users/:id` | public | Get user by ID (no JWT required today — consider adding) |
+| `GET` | `/api/v1/users/profile` | private | Get current user's profile (JWT middleware) |
+| `PUT` | `/api/v1/users/profile` | private | Update current user's profile (JWT middleware) |
+| `POST` | `/api/v1/users` | internal | Create new user — **in-cluster only, not on gateway** |
+
+### Edge paths (what the browser sends)
+
+Kong in the `user` namespace rewrites `/user/v1/{audience}/users/...` → `/api/v1/users/...`. Internal endpoints stay off Kong and are reachable only via `http://user.user.svc.cluster.local:8080/api/v1/users`.
+
+| Edge path (browser) | → Cluster path |
+|---------------------|----------------|
+| `GET gateway.duynhne.me/user/v1/public/users/:id` | `GET /api/v1/users/:id` |
+| `GET gateway.duynhne.me/user/v1/private/users/profile` | `GET /api/v1/users/profile` |
+| `PUT gateway.duynhne.me/user/v1/private/users/profile` | `PUT /api/v1/users/profile` |
+| *(no edge path)* | `POST /api/v1/users` — internal only |
+
+Convention + rewrite rule: [`homelab/docs/api/api-naming-convention.md`](https://github.com/duynhlab/homelab/blob/main/docs/api/api-naming-convention.md).

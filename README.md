@@ -10,11 +10,14 @@ User management microservice for profiles and account operations.
 
 ## API Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/v1/users/:id` | Get user by ID |
-| `GET` | `/api/v1/users/profile` | Get user profile |
-| `PUT` | `/api/v1/users/profile` | Update profile |
+> **Browser callers** hit `https://gateway.duynhne.me/user/v1/{public,private}/users/…`; Kong rewrites to the cluster paths below. `POST /api/v1/users` stays internal (not on the gateway). See [homelab naming convention](https://github.com/duynhlab/homelab/blob/main/docs/api/api-naming-convention.md).
+
+| Method | Cluster path | Edge path (via gateway) |
+|--------|--------------|-------------------------|
+| `GET` | `/api/v1/users/:id` | `/user/v1/public/users/:id` |
+| `GET` | `/api/v1/users/profile` | `/user/v1/private/users/profile` |
+| `PUT` | `/api/v1/users/profile` | `/user/v1/private/users/profile` |
+| `POST` | `/api/v1/users` | *(internal — not on gateway)* |
 
 ## Tech Stack
 
