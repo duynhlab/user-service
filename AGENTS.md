@@ -138,9 +138,13 @@ go build ./... && go test ./... && golangci-lint run --timeout=10m
 
 ## 🔌 API Reference
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/v1/users/:id` | Get user by ID |
-| `GET` | `/api/v1/users/profile` | Get user profile |
-| `PUT` | `/api/v1/users/profile` | Update user profile |
-| `POST` | `/api/v1/users` | Create new user (internal) |
+Routes are mounted directly at `/{service}/v1/{audience}/…` (Variant A — single URL shape across browser and in-cluster callers). Kong is pure pass-through for `public`/`private`; `internal` is reachable only via service DNS.
+
+| Method | Path | Audience | Description |
+|--------|------|----------|-------------|
+| `GET` | `/user/v1/public/users/:id` | public | Get user by ID (no JWT required today — consider adding) |
+| `GET` | `/user/v1/private/users/profile` | private | Get current user's profile |
+| `PUT` | `/user/v1/private/users/profile` | private | Update current user's profile |
+| `POST` | `/user/v1/internal/users` | internal | Create new user — called by `auth-service` during registration via `http://user.user.svc.cluster.local:8080` |
+
+Full convention + inventory: [`homelab/docs/api/api-naming-convention.md`](https://github.com/duynhlab/homelab/blob/main/docs/api/api-naming-convention.md).

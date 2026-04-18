@@ -113,17 +113,18 @@ func setupServer(cfg *config.Config, logger *zap.Logger, authClient *middleware.
 	})
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
-	apiV1 := r.Group("/api/v1")
+	// User v1 routes — Variant A edge naming (see api-naming-convention.md)
+	r.GET("/user/v1/public/users/:id", userHandler.GetUser)
+
+	privateUsers := r.Group("/user/v1/private/users")
+	privateUsers.Use(middleware.AuthMiddleware(authClient, logger, cfg.AuthAllowUnauthenticatedFallback))
 	{
-		apiV1.GET("/users/:id", userHandler.GetUser)
-		profileGroup := apiV1.Group("/users")
-		profileGroup.Use(middleware.AuthMiddleware(authClient, logger, cfg.AuthAllowUnauthenticatedFallback))
-		{
-			profileGroup.GET("/profile", userHandler.GetProfile)
-			profileGroup.PUT("/profile", userHandler.UpdateProfile)
-		}
-		apiV1.POST("/users", userHandler.CreateUser)
+		privateUsers.GET("/profile", userHandler.GetProfile)
+		privateUsers.PUT("/profile", userHandler.UpdateProfile)
 	}
+
+	// Internal: called by auth-service during registration. Not routed through Kong.
+	r.POST("/user/v1/internal/users", userHandler.CreateUser)
 
 	return &http.Server{
 		Addr:              ":" + cfg.Service.Port,

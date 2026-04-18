@@ -165,7 +165,7 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 	c.JSON(http.StatusCreated, user)
 }
 
-// UpdateProfile handles PUT /api/v1/users/profile
+// UpdateProfile handles PUT /user/v1/private/users/profile
 func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	ctx, span := middleware.StartSpan(c.Request.Context(), "http.request", trace.WithAttributes(
 		attribute.String("layer", "web"),

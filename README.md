@@ -10,11 +10,14 @@ User management microservice for profiles and account operations.
 
 ## API Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/v1/users/:id` | Get user by ID |
-| `GET` | `/api/v1/users/profile` | Get user profile |
-| `PUT` | `/api/v1/users/profile` | Update profile |
+All routes follow Variant A naming — single path for browser and in-cluster callers. See [homelab naming convention](https://github.com/duynhlab/homelab/blob/main/docs/api/api-naming-convention.md).
+
+| Method | Path | Audience |
+|--------|------|----------|
+| `GET` | `/user/v1/public/users/:id` | public |
+| `GET` | `/user/v1/private/users/profile` | private |
+| `PUT` | `/user/v1/private/users/profile` | private |
+| `POST` | `/user/v1/internal/users` | internal (auth-service during registration; in-cluster only) |
 
 ## Tech Stack
 
