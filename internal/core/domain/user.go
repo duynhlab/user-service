@@ -18,6 +18,7 @@ type UserProfile struct {
 }
 
 type CreateUserRequest struct {
+	UserID   int    `json:"user_id" binding:"required"`
 	Username string `json:"username" binding:"required"`
 	Email    string `json:"email" binding:"required,email"`
 	Name     string `json:"name" binding:"required"`

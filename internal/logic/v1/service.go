@@ -124,8 +124,12 @@ func (s *UserService) CreateUser(ctx context.Context, req domain.CreateUserReque
 		return nil, fmt.Errorf("validate email %q for user %q: %w", req.Email, req.Username, domain.ErrInvalidEmail)
 	}
 
-	// Mock production user_id logic (same as before)
-	userID := len(req.Username) + 100
+	// Require an authoritative user_id from the caller; never synthesize one.
+	if req.UserID <= 0 {
+		span.SetAttributes(attribute.Bool("user.created", false))
+		return nil, fmt.Errorf("create user %q: %w", req.Username, domain.ErrInvalidUserID)
+	}
+	userID := req.UserID
 
 	// Check if profile exists
 	exists, err := s.repo.CheckProfileExists(ctx, userID)
@@ -180,11 +184,10 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID string, req doma
 	defer span.End()
 
 	// Parse user ID
-	uid := 1
-	if userID != "" {
-		if parsed, err := strconv.Atoi(userID); err == nil {
-			uid = parsed
-		}
+	uid, err := strconv.Atoi(userID)
+	if err != nil {
+		span.SetAttributes(attribute.Bool("profile.updated", false))
+		return nil, fmt.Errorf("invalid user_id %q: %w", userID, domain.ErrUnauthorized)
 	}
 
 	// Parse name
@@ -198,7 +201,7 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID string, req doma
 	}
 
 	// Upsert profile
-	err := s.repo.UpsertUserProfile(ctx, uid, firstName, lastName, req.Phone)
+	err = s.repo.UpsertUserProfile(ctx, uid, firstName, lastName, req.Phone)
 	if err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("upsert profile: %w", err)

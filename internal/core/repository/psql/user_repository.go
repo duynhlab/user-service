@@ -89,7 +89,7 @@ func (r *UserRepository) UpdateUserProfile(ctx context.Context, userID int, firs
 		return false, errors.New("database connection not available")
 	}
 
-	query := `UPDATE user_profiles SET first_name = $1, last_name = $2, phone = $3 WHERE user_id = $4`
+	query := `UPDATE user_profiles SET first_name = COALESCE(NULLIF($1, ''), first_name), last_name = COALESCE(NULLIF($2, ''), last_name), phone = COALESCE(NULLIF($3, ''), phone) WHERE user_id = $4`
 	result, err := db.Exec(ctx, query, firstName, lastName, phone, userID)
 	if err != nil {
 		return false, fmt.Errorf("update profile: %w", err)

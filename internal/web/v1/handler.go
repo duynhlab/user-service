@@ -13,6 +13,14 @@ import (
 	"go.uber.org/zap"
 )
 
+// PublicUser is the minimal, public-safe view of a user returned by the
+// public GET /user/v1/public/users/:id endpoint. It deliberately omits email
+// and other sensitive fields.
+type PublicUser struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 // UserHandler handles HTTP requests for user operations
 type UserHandler struct {
 	service *logicv1.UserService
@@ -63,7 +71,7 @@ func (h *UserHandler) GetUser(c *gin.Context) {
 	}
 
 	zapLogger.Info("User retrieved", zap.String("user_id", id))
-	c.JSON(http.StatusOK, user)
+	c.JSON(http.StatusOK, PublicUser{ID: user.ID, Name: user.Name})
 }
 
 // GetProfile handles HTTP request to get current user profile
@@ -155,6 +163,8 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"error": "User already exists"})
 		case errors.Is(err, domain.ErrInvalidEmail):
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid email address"})
+		case errors.Is(err, domain.ErrInvalidUserID):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user id"})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		}
@@ -208,7 +218,13 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	if err != nil {
 		span.RecordError(err)
 		zapLogger.Error("Failed to update profile", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+
+		switch {
+		case errors.Is(err, domain.ErrUnauthorized):
+			c.JSON(http.StatusForbidden, gin.H{"error": "Unauthorized access"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		}
 		return
 	}
 
