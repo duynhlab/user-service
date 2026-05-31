@@ -117,7 +117,7 @@ func setupServer(cfg *config.Config, logger *zap.Logger, authClient *middleware.
 	r.GET("/user/v1/public/users/:id", userHandler.GetUser)
 
 	privateUsers := r.Group("/user/v1/private/users")
-	privateUsers.Use(middleware.AuthMiddleware(authClient, logger, cfg.AuthAllowUnauthenticatedFallback))
+	privateUsers.Use(middleware.AuthMiddleware(authClient, logger))
 	{
 		privateUsers.GET("/profile", userHandler.GetProfile)
 		privateUsers.PUT("/profile", userHandler.UpdateProfile)

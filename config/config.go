@@ -48,9 +48,6 @@ type Config struct {
 	// From READINESS_DRAIN_DELAY env (default: 5s, max: 30s).
 	ReadinessDrainDelay int
 	AuthServiceURL      string // Auth service URL for token introspection - from AUTH_SERVICE_URL env
-	// AuthAllowUnauthenticatedFallback: when true, allows requests without token to proceed with user_id="1" (demo only).
-	// When false (default), returns 401 for missing/invalid tokens. Set AUTH_ALLOW_UNAUTHENTICATED_FALLBACK=true for local/dev.
-	AuthAllowUnauthenticatedFallback bool
 }
 
 // ServiceConfig defines basic service configuration
@@ -160,10 +157,9 @@ func Load() *Config {
 			PoolMode:       getEnv("DB_POOL_MODE", ""),
 			PoolerType:     getEnv("DB_POOLER_TYPE", ""),
 		},
-		ShutdownTimeout:                  getEnvDurationSeconds("SHUTDOWN_TIMEOUT", 10),
-		ReadinessDrainDelay:              getEnvDurationSecondsWithMax("READINESS_DRAIN_DELAY", 5, 30),
-		AuthServiceURL:                   getEnv("AUTH_SERVICE_URL", "http://auth.auth.svc.cluster.local:8080"),
-		AuthAllowUnauthenticatedFallback: getEnvBool("AUTH_ALLOW_UNAUTHENTICATED_FALLBACK", false),
+		ShutdownTimeout:     getEnvDurationSeconds("SHUTDOWN_TIMEOUT", 10),
+		ReadinessDrainDelay: getEnvDurationSecondsWithMax("READINESS_DRAIN_DELAY", 5, 30),
+		AuthServiceURL:      getEnv("AUTH_SERVICE_URL", "http://auth.auth.svc.cluster.local:8080"),
 	}
 }
 
