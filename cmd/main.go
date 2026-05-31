@@ -19,6 +19,9 @@ import (
 	logicv1 "github.com/duynhlab/user-service/internal/logic/v1"
 	webv1 "github.com/duynhlab/user-service/internal/web/v1"
 	"github.com/duynhlab/user-service/middleware"
+	"github.com/duynhne/pkg/authmw"
+	"github.com/duynhne/pkg/grpcx"
+	authv1 "github.com/duynhne/pkg/proto/auth/v1"
 )
 
 func main() {
@@ -57,8 +60,15 @@ func main() {
 	userService := logicv1.NewUserService(userRepo)
 	userHandler := webv1.NewUserHandler(userService)
 
-	authClient := middleware.NewAuthClient(cfg.AuthServiceURL)
-	logger.Info("Auth client initialized", zap.String("auth_service_url", cfg.AuthServiceURL))
+	// Validate tokens against auth over gRPC (shared fail-closed authmw).
+	authConn, err := grpcx.Dial(cfg.AuthGRPCAddr)
+	if err != nil {
+		logger.Error("Failed to dial auth gRPC", zap.String("addr", cfg.AuthGRPCAddr), zap.Error(err))
+		return
+	}
+	defer func() { _ = authConn.Close() }()
+	authClient := authv1.NewAuthServiceClient(authConn)
+	logger.Info("Auth gRPC client initialized", zap.String("auth_grpc_addr", cfg.AuthGRPCAddr))
 
 	var isShuttingDown atomic.Bool
 	srv := setupServer(cfg, logger, authClient, &isShuttingDown, userHandler)
@@ -94,7 +104,7 @@ func initProfiling(cfg *config.Config, logger *zap.Logger) {
 	logger.Info("Profiling initialized", zap.String("endpoint", cfg.Profiling.Endpoint))
 }
 
-func setupServer(cfg *config.Config, logger *zap.Logger, authClient *middleware.AuthClient, isShuttingDown *atomic.Bool, userHandler *webv1.UserHandler) *http.Server {
+func setupServer(cfg *config.Config, logger *zap.Logger, authClient authv1.AuthServiceClient, isShuttingDown *atomic.Bool, userHandler *webv1.UserHandler) *http.Server {
 	r := gin.Default()
 
 	r.Use(middleware.TracingMiddleware())
@@ -117,7 +127,7 @@ func setupServer(cfg *config.Config, logger *zap.Logger, authClient *middleware.
 	r.GET("/user/v1/public/users/:id", userHandler.GetUser)
 
 	privateUsers := r.Group("/user/v1/private/users")
-	privateUsers.Use(middleware.AuthMiddleware(authClient, logger))
+	privateUsers.Use(authmw.Middleware(authClient))
 	{
 		privateUsers.GET("/profile", userHandler.GetProfile)
 		privateUsers.PUT("/profile", userHandler.UpdateProfile)

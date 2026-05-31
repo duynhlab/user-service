@@ -47,7 +47,7 @@ type Config struct {
 	// This gives Kubernetes/Service routing time to stop sending new traffic.
 	// From READINESS_DRAIN_DELAY env (default: 5s, max: 30s).
 	ReadinessDrainDelay int
-	AuthServiceURL      string // Auth service URL for token introspection - from AUTH_SERVICE_URL env
+	AuthGRPCAddr        string // Auth service gRPC target for token validation - from AUTH_GRPC_ADDR env
 }
 
 // ServiceConfig defines basic service configuration
@@ -159,7 +159,7 @@ func Load() *Config {
 		},
 		ShutdownTimeout:     getEnvDurationSeconds("SHUTDOWN_TIMEOUT", 10),
 		ReadinessDrainDelay: getEnvDurationSecondsWithMax("READINESS_DRAIN_DELAY", 5, 30),
-		AuthServiceURL:      getEnv("AUTH_SERVICE_URL", "http://auth.auth.svc.cluster.local:8080"),
+		AuthGRPCAddr:        getEnv("AUTH_GRPC_ADDR", "dns:///auth.auth.svc.cluster.local:9090"),
 	}
 }
 
