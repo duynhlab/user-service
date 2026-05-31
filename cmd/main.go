@@ -19,9 +19,9 @@ import (
 	logicv1 "github.com/duynhlab/user-service/internal/logic/v1"
 	webv1 "github.com/duynhlab/user-service/internal/web/v1"
 	"github.com/duynhlab/user-service/middleware"
-	"github.com/duynhne/pkg/authmw"
-	"github.com/duynhne/pkg/grpcx"
-	authv1 "github.com/duynhne/pkg/proto/auth/v1"
+	"github.com/duynhlab/pkg/authmw"
+	"github.com/duynhlab/pkg/grpcx"
+	authv1 "github.com/duynhlab/pkg/proto/auth/v1"
 )
 
 func main() {
