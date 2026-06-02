@@ -8,6 +8,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+
+	"github.com/duynhlab/pkg/obsx"
 )
 
 const TraceIDHeader = "X-Trace-ID"
@@ -15,6 +17,11 @@ const TraceParentHeader = "traceparent"
 
 // GetTraceID extracts trace-id from request headers or generates a new one
 func GetTraceID(c *gin.Context) string {
+	// Prefer the active span's trace ID (tracing middleware runs first).
+	if traceID := obsx.TraceIDFromContext(c.Request.Context()); traceID != "" {
+		return traceID
+	}
+
 	// Try W3C Trace Context first (traceparent header)
 	if traceParent := c.GetHeader(TraceParentHeader); traceParent != "" {
 		// traceparent format: version-trace_id-parent_id-flags
