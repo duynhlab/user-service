@@ -5,17 +5,19 @@ import (
 	"errors"
 	"fmt"
 
-	database "github.com/duynhlab/user-service/internal/core"
 	"github.com/duynhlab/user-service/internal/core/domain"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // UserRepository implements domain.UserRepository using PostgreSQL
-type UserRepository struct{}
+type UserRepository struct {
+	pool *pgxpool.Pool
+}
 
 // NewUserRepository creates a new PostgreSQL user repository
-func NewUserRepository() *UserRepository {
-	return &UserRepository{}
+func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
+	return &UserRepository{pool: pool}
 }
 
 // GetUser retrieves a user by ID
@@ -39,7 +41,7 @@ func (r *UserRepository) GetUser(ctx context.Context, id string) (*domain.User, 
 
 // GetProfileByUserID retrieves a user profile by user ID
 func (r *UserRepository) GetProfileByUserID(ctx context.Context, userID int) (*domain.UserProfile, error) {
-	db := database.GetPool()
+	db := r.pool
 	if db == nil {
 		return nil, errors.New("database connection not available")
 	}
@@ -67,7 +69,7 @@ func (r *UserRepository) GetProfileByUserID(ctx context.Context, userID int) (*d
 
 // CreateUserProfile creates a new user profile
 func (r *UserRepository) CreateUserProfile(ctx context.Context, userID int, firstName, lastName string) (int, error) {
-	db := database.GetPool()
+	db := r.pool
 	if db == nil {
 		return 0, errors.New("database connection not available")
 	}
@@ -84,7 +86,7 @@ func (r *UserRepository) CreateUserProfile(ctx context.Context, userID int, firs
 // UpdateUserProfile updates an existing user profile
 // Returns true if updated, false if not found
 func (r *UserRepository) UpdateUserProfile(ctx context.Context, userID int, firstName, lastName, phone string) (bool, error) {
-	db := database.GetPool()
+	db := r.pool
 	if db == nil {
 		return false, errors.New("database connection not available")
 	}
@@ -100,7 +102,7 @@ func (r *UserRepository) UpdateUserProfile(ctx context.Context, userID int, firs
 
 // CheckProfileExists checks if a profile exists for a user ID
 func (r *UserRepository) CheckProfileExists(ctx context.Context, userID int) (bool, error) {
-	db := database.GetPool()
+	db := r.pool
 	if db == nil {
 		return false, errors.New("database connection not available")
 	}
@@ -129,7 +131,7 @@ func (r *UserRepository) UpsertUserProfile(ctx context.Context, userID int, firs
 	}
 
 	// If not updated, create
-	db := database.GetPool()
+	db := r.pool
 	query := `INSERT INTO user_profiles (user_id, first_name, last_name, phone) VALUES ($1, $2, $3, $4)`
 	_, err = db.Exec(ctx, query, userID, firstName, lastName, phone)
 	if err != nil {

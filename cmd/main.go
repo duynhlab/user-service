@@ -69,7 +69,7 @@ func main() {
 	logger.Info("Database connection pool established")
 
 	// Initialize Dependency Injection
-	userRepo := psql.NewUserRepository()
+	userRepo := psql.NewUserRepository(pool)
 	userService := logicv1.NewUserService(userRepo)
 	userHandler := webv1.NewUserHandler(userService)
 
