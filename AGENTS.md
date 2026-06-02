@@ -1,208 +1,192 @@
-# user-service
+# AGENTS.md
 
-> AI Agent context for understanding this repository
+Agent guide for `user-service`. Keep changes small, verified, and consistent
+with the patterns below. Read the code before editing — this file describes
+intent, the code is the source of truth.
 
-## 📋 Overview
+## Contribution workflow
 
-User management microservice. Handles user profiles and account operations.
+- Never commit or push to `main`. Branch, then open a PR.
+- Branch names: `feat/…`, `fix/…`, `docs/…`, `chore/…`, `refactor/…`.
+- One logical change per PR. Squash-merge.
+- Commit subject: ≤ 50 chars, imperative mood, capitalised, no trailing period
+  (`Add profile upsert path`, not `Added` / `Adds`).
+- Commit body (only if non-trivial): wrap at 72 chars, explain *what* and *why*.
+- Do **not** add attribution trailers (`Signed-off-by`, `Co-authored-by`,
+  `Generated-by`, …), issue references (`Fixes #123`), or `@`-mentions.
+- CI (`.github/workflows/check.yml`) runs `go-check` (test + lint), gitleaks,
+  and sonar on every PR. Green is required.
 
-Module path: `github.com/duynhlab/user-service`.
+## Code quality
 
-It is a gRPC **client** of `auth-service`: the shared `pkg/authmw` middleware
-validates each request's bearer token by calling `auth.v1.AuthService/GetMe`
-over gRPC (target `AUTH_GRPC_ADDR`). gRPC is the official east-west transport;
-this service exposes no gRPC server, only the HTTP API below.
+- Target Go 1.26 (`go.mod` pins `go 1.26.2`). Idiomatic Go only.
+- Wrap errors with `fmt.Errorf("…: %w", err)`; return sentinel `domain.Err…`
+  for known conditions. No naked `panic` outside `main` bootstrap.
+- Always check error returns (or explicit `_ = fn()`).
+- Constructor injection for dependencies; no hidden globals in new code.
+- `golangci-lint` v2 (`.golangci.yml`) is authoritative. Common fixes:
+  - `perfsprint`: `errors.New()` over `fmt.Errorf()` with no verbs.
+  - `nosprintfhostport`: `net.JoinHostPort()` over `fmt.Sprintf("%s:%s", …)`.
+  - `noctx`: `http.NewRequestWithContext()` over `http.NewRequest()`.
+  - `goconst` / `gocognit`: extract repeated literals / helper functions.
 
-## 🏗️ Architecture Guidelines
+## Project overview
 
-### 3-Layer Architecture
+User-management microservice: user lookup and profile read/write. HTTP-only
+public surface (Gin); no gRPC server.
 
-| Layer | Location | Responsibility |
-|-------|----------|----------------|
-| **Web** | `internal/web/v1/handler.go` | HTTP handling, validation, error translation |
-| **Logic** | `internal/logic/v1/service.go` | Business rules (❌ NO SQL) |
-| **Core** | `internal/core/` | Domain models (`core/domain/`), repository interface + impl (`core/repository/psql/`), DB pool (`core/database.go`) |
-
-### 3-Layer Coding Rules
-
-**CRITICAL**: Strict layer boundaries. Violations will be rejected in code review.
-
-#### Layer Boundaries
-
-| Layer | Location | ALLOWED | FORBIDDEN |
-|-------|----------|---------|-----------|
-| **Web** | `internal/web/v1/` | HTTP handling, JSON binding, DTO mapping, call Logic, aggregation | SQL queries, direct DB access, business rules |
-| **Logic** | `internal/logic/v1/` | Business rules, call repository interfaces, domain errors | SQL queries, `database.GetPool()`, HTTP handling, `*gin.Context` |
-| **Core** | `internal/core/` | Domain models, repository implementations, SQL queries, DB connection | HTTP handling, business orchestration |
-
-#### Dependency Direction
-
-```
-Web -> Logic -> Core (one-way only, never reverse)
-```
-
-- Web imports Logic and Core/domain
-- Logic imports Core/domain and Core/repository interfaces
-- Core imports nothing from Web or Logic
-
-#### DO
-
-- Put HTTP handlers, request validation, error-to-status mapping in `web/`
-- Put business rules, orchestration, transaction logic in `logic/`
-- Put SQL queries in `core/repository/` implementations
-- Use repository interfaces (defined in `core/domain/`) for data access in Logic layer
-- Use dependency injection (constructor parameters) for all service dependencies
-
-#### DO NOT
-
-- Write SQL or call `database.GetPool()` in Logic layer
-- Import `gin` or handle HTTP in Logic layer
-- Put business rules in Web layer (Web only translates and delegates)
-- Call Logic functions directly from another service (use HTTP aggregation in Web layer)
-- Skip the Logic layer (Web must not call Core/repository directly)
-
-### Directory Structure
-
-```
-user-service/
-├── cmd/main.go
-├── config/config.go
-├── db/migrations/sql/
-├── internal/
-│   ├── core/
-│   │   ├── database.go          # pgxpool connect + global GetPool()
-│   │   ├── domain/             # models, errors, UserRepository interface
-│   │   └── repository/psql/    # PostgreSQL UserRepository implementation
-│   ├── logic/v1/service.go
-│   └── web/v1/handler.go
-├── middleware/                  # tracing, logging, prometheus, profiling, resource
-└── Dockerfile
-```
-
-### Wiring (`cmd/main.go`)
-
-```
-userRepo    := psql.NewUserRepository()        // no args; uses core.GetPool()
-userService := logicv1.NewUserService(userRepo) // repo injected via constructor
-userHandler := webv1.NewUserHandler(userService)
-authConn, _ := grpcx.Dial(cfg.AuthGRPCAddr)     // gRPC client → auth-service
-authClient  := authv1.NewAuthServiceClient(authConn)
-```
-
-The `UserService` receives its repository by constructor injection. The
-repository implementation (`core/repository/psql`) currently reaches the
-connection pool through the package-global `database.GetPool()` rather than a
-pool injected into its constructor — keep that pattern unless explicitly asked
-to refactor it. `GetUser` is still a stub (returns synthesized data; `id ==
-"999"` yields `ErrUserNotFound`) because user-service does not own the `users`
-table; the profile read/write paths (`user_profiles`) hit real SQL.
-
-## 🛠️ Development Workflow
-
-### Code Quality
-
-**MANDATORY**: All code changes MUST pass lint before committing.
-
-- Linter: `golangci-lint` v2+ with `.golangci.yml` config (60+ linters enabled)
-- Zero tolerance: PRs with lint errors will NOT be merged
-- CI enforces: `go-check` job runs lint on every PR
-
-#### Commands (run in order)
-
-```bash
-go mod tidy              # Clean dependencies
-go build ./...           # Verify compilation
-go test ./...            # Run tests
-golangci-lint run --timeout=10m  # Lint (MUST pass)
-```
-
-#### Pre-commit One-liner
-
-```bash
-go build ./... && go test ./... && golangci-lint run --timeout=10m
-```
-
-### Common Lint Fixes
-
-- `perfsprint`: Use `errors.New()` instead of `fmt.Errorf()` when no format verbs
-- `nosprintfhostport`: Use `net.JoinHostPort()` instead of `fmt.Sprintf("%s:%s", host, port)`
-- `errcheck`: Always check error returns (or explicitly `_ = fn()`)
-- `goconst`: Extract repeated string literals to constants
-- `gocognit`: Extract helper functions to reduce complexity
-- `noctx`: Use `http.NewRequestWithContext()` instead of `http.NewRequest()`
-
-## 🔧 Tech Stack
+- Module: `github.com/duynhlab/user-service`.
+- gRPC **client** of `auth-service` for token validation (see Conventions).
+- Shared libs from `github.com/duynhlab/pkg` (`authmw`, `grpcx`, `obsx`,
+  generated `proto/auth/v1`).
 
 | Component | Technology |
 |-----------|------------|
-| Language | Go 1.26 |
+| Language  | Go 1.26 |
 | Framework | Gin |
-| Database | PostgreSQL via pgx/v5 (`pgxpool`) |
-| Auth (east-west) | gRPC client of auth-service via `pkg/grpcx` + `pkg/authmw` |
-| Logging | Zap (structured, trace-correlated) |
-| Tracing | OpenTelemetry (OTLP HTTP → OTel Collector) |
-| Metrics | Prometheus (HTTP RED in-repo + gRPC client RED via `pkg/obsx`) |
+| Database  | PostgreSQL 16 via `pgx/v5` (`pgxpool`) |
+| Auth      | gRPC client of `auth-service` (`pkg/authmw`, `pkg/grpcx`) |
+| Logging   | Zap (structured, trace-correlated) |
+| Tracing   | OpenTelemetry (OTLP → OTel Collector) |
+| Metrics   | Prometheus (HTTP RED in-repo + gRPC client RED via `pkg/obsx`) |
 | Profiling | Pyroscope |
-| Shared libs | `github.com/duynhlab/pkg` (`authmw`, `grpcx`, `obsx`, generated `proto/auth/v1`) |
 
-### Observability (single `/metrics`)
+## Repository layout
 
-The process exposes ONE Prometheus endpoint at `/metrics`. HTTP RED metrics
-(`request_duration_seconds`, `requests_in_flight`, `request_size_bytes`,
-`response_size_bytes`) are recorded by `middleware/prometheus.go`. In `main()`,
-`obsx.SetupMetrics()` installs a global OpenTelemetry meter provider backed by a
-Prometheus exporter on the **default** registry, so the gRPC client RED metrics
-(`rpc_client_*`) from the otelgrpc handler in `pkg/grpcx` land on the **same**
-`/metrics` — there is no separate metrics port (a gRPC server would own `:9090`,
-so HTTP can't be served there). One platform ServiceMonitor scrapes it.
+```
+cmd/main.go                          # entrypoint: config, wiring, server, graceful shutdown
+config/config.go                     # env-driven config + Validate()
+internal/
+  web/v1/                            # HTTP handlers, request binding/validation, DTO mapping
+  logic/v1/                          # business rules, orchestration (NO SQL)
+  core/
+    database.go                      # pgxpool Connect() + DSN build (pooler-safe)
+    domain/                          # models, sentinel errors, UserRepository interface
+    repository/psql/                 # PostgreSQL UserRepository implementation (SQL lives here)
+middleware/                          # tracing, logging, prometheus, profiling, resource
+db/migrations/                       # Flyway SQL + migration image Dockerfile + .trivyignore
+Dockerfile                           # service image (distroless-style alpine)
+```
 
-Logging middleware derives `trace_id` from `obsx.TraceIDFromContext(ctx)` (the
-active span's ID) so logs and traces correlate; it only falls back to the
-`traceparent`/`X-Trace-ID` headers or a generated ID when no span exists.
+## Build, test, lint
 
-**Middleware order (do not reorder):** `TracingMiddleware → LoggingMiddleware →
-PrometheusMiddleware`. Tracing must run first so logging/metrics see the span.
+```bash
+GOTOOLCHAIN=auto go build ./...
+GOTOOLCHAIN=auto go vet ./...
+GOTOOLCHAIN=auto go test ./...
+golangci-lint run
+```
 
-### gRPC auth middleware (`pkg/authmw`)
+One-liner before pushing:
 
-`private` routes use `authmw.Middleware(authClient)`. It forwards the incoming
-`Authorization` header to `auth.v1.AuthService/GetMe` over gRPC and **fails
-closed**: no header → 401, `Unauthenticated` → 401, any other error (auth
-unreachable, internal) → 503. On success it sets `user_id`, `username`, `email`
-in the gin context — handlers read these, never parse JWTs themselves. Do not
-reintroduce per-service token parsing; the shared middleware is the single
-source of fail-closed behaviour.
+```bash
+GOTOOLCHAIN=auto go build ./... && GOTOOLCHAIN=auto go test ./... && golangci-lint run
+```
 
-## 🏗️ Infrastructure Details
+## Conventions
 
-### Database
+### 3-layer architecture (Web → Logic → Core)
 
-| Component | Value |
-|-----------|-------|
-| **Cluster** | supporting-db (Zalando Postgres Operator) |
-| **PostgreSQL** | 16 |
-| **HA** | Single instance |
-| **Pooler** | PgBouncer Sidecar |
-| **Endpoint** | `supporting-db-pooler.user.svc.cluster.local:5432` |
-| **Pool Mode** | Transaction |
-| **Shared DB** | Yes (with notification, shipping services) |
+One-way dependency: `web → logic → core`, never reverse. Core imports nothing
+from `web` or `logic`.
 
-### Graceful Shutdown
+| Layer | Path | Do | Don't |
+|-------|------|----|-------|
+| Web   | `internal/web/v1/` | HTTP handling, JSON binding, validation, error→status, call Logic | SQL, direct DB access, business rules |
+| Logic | `internal/logic/v1/` | Business rules, orchestration, call repository interfaces | SQL, `*gin.Context`, import `gin`, touch the pool |
+| Core  | `internal/core/` | Domain models, repository impl, SQL, DB pool | HTTP handling, business orchestration |
 
-**VictoriaMetrics Pattern:**
-1. `/ready` → 503 when `isShuttingDown = true`
-2. Sleep `READINESS_DRAIN_DELAY` (5s)
-3. Sequential: HTTP → Database → Tracer
+- Define repository interfaces in `core/domain`; depend on the interface from
+  Logic, inject the `psql` implementation in `cmd/main.go`.
+- Web must call Logic, never `core/repository` directly. Logic must not skip to
+  the pool.
 
-## 🔌 API Reference
+### gRPC client → auth (`pkg/authmw`)
 
-Routes are mounted directly at `/{service}/v1/{audience}/…` (Variant A — single URL shape across browser and in-cluster callers). Kong is pure pass-through for `public`/`private`; `internal` is reachable only via service DNS.
+`user-service` is a gRPC **client** of `auth-service`; it runs no gRPC server.
 
-| Method | Path | Audience | Description |
-|--------|------|----------|-------------|
-| `GET` | `/user/v1/public/users/:id` | public | Get user by ID (no JWT required today — consider adding) |
-| `GET` | `/user/v1/private/users/profile` | private | Get current user's profile |
-| `PUT` | `/user/v1/private/users/profile` | private | Update current user's profile |
-| `POST` | `/user/v1/internal/users` | internal | Create new user — called by `auth-service` during registration via `http://user.user.svc.cluster.local:8080` |
+- `private` routes use `authmw.Middleware(authClient)`. It forwards the incoming
+  `Authorization` header to `auth.v1.AuthService/GetMe` over gRPC.
+- Target is `AUTH_GRPC_ADDR` (default `dns:///auth.auth.svc.cluster.local:9090`),
+  dialled via `pkg/grpcx`.
+- **Fail-closed**: no header → 401; `Unauthenticated` → 401; any other error
+  (auth unreachable, internal) → 503.
+- On success it sets `user_id`, `username`, `email` in the gin context —
+  handlers read these. Do **not** parse JWTs per-service; the shared middleware
+  is the single source of fail-closed behaviour.
 
-Full convention + inventory: [`homelab/docs/api/api-naming-convention.md`](https://github.com/duynhlab/homelab/blob/main/docs/api/api-naming-convention.md).
+### Observability (`pkg/obsx`, single `/metrics`)
+
+- One Prometheus endpoint at `/metrics`. HTTP RED metrics come from
+  `middleware/prometheus.go`. In `main()`, `obsx.SetupMetrics()` installs a
+  global OTel meter provider on the **default** Prometheus registry so the
+  otelgrpc handler in `pkg/grpcx` lands gRPC client RED metrics (`rpc_client_*`)
+  on the **same** `/metrics`. No separate metrics port.
+- Logging derives `trace_id` from `obsx.TraceIDFromContext(ctx)` so logs and
+  traces correlate; header / generated-ID fallback only when no span exists.
+- Middleware order — **do not reorder**:
+
+  ```
+  TracingMiddleware → LoggingMiddleware → PrometheusMiddleware
+  ```
+
+  Tracing runs first so logging and metrics observe the active span.
+
+### Diagrams
+
+Use **Mermaid** for all diagrams. No ASCII art.
+
+```mermaid
+flowchart LR
+    Web[web/v1] --> Logic[logic/v1] --> Core[core + repository/psql] --> DB[(PostgreSQL)]
+    Web -- "private routes" --> AuthMW[pkg/authmw]
+    AuthMW -- "GetMe over gRPC" --> Auth[(auth-service)]
+```
+
+### Routes (Variant A — `/{service}/v1/{audience}/…`)
+
+Routes mount directly on the Gin router; Kong is pure pass-through for
+`public`/`private`. `internal` is reachable only via service DNS.
+
+| Method | Path | Audience |
+|--------|------|----------|
+| `GET`  | `/user/v1/public/users/:id` | public |
+| `GET`  | `/user/v1/private/users/profile` | private |
+| `PUT`  | `/user/v1/private/users/profile` | private |
+| `POST` | `/user/v1/internal/users` | internal (called by `auth-service` at registration) |
+
+## Gotchas
+
+### Data-access pattern (read the code)
+
+- The `psql.UserRepository` takes a `*pgxpool.Pool` via constructor injection
+  (`NewUserRepository(pool)` in `cmd/main.go`). The package-global
+  `database.GetPool()` / `GetDB()` still exist but are **not** used by the
+  repository — prefer the injected pool; don't reach for the global in new code.
+- `core/database.Connect()` returns the pool **and** sets the global; pass the
+  returned pool through wiring.
+- `GetUser` is a **stub**: it synthesises a `domain.User` from the id and
+  returns `ErrUserNotFound` for `id == "999"`. It runs **no SQL** because
+  `user-service` does not own the `users` table (`auth-service` does). Only the
+  profile paths hit real SQL against `user_profiles`
+  (`GetProfileByUserID`, `CreateUserProfile`, `UpdateUserProfile`,
+  `CheckProfileExists`, `UpsertUserProfile`). Don't "fix" `GetUser` to query a
+  table that isn't owned here.
+- DB connects in `pgx.QueryExecModeSimpleProtocol` with statement caching
+  disabled for transaction-mode poolers (PgBouncer). Keep that when touching
+  `database.go`.
+
+### Container images (Kyverno-enforced)
+
+- Service image base is pinned (`golang:1.26.3-alpine`, `alpine`). Pin tags or
+  digests for any new image — **never `:latest`** on workloads; the cluster's
+  Kyverno policies reject it.
+
+### Flyway migration image `.trivyignore`
+
+- `db/migrations/.trivyignore` suppresses **upstream** CVEs bundled in the
+  official `flyway/flyway` image (transitive JARs that can't be patched locally).
+  Each entry is annotated with the dependency and reason. When bumping the
+  Flyway base image in `db/migrations/Dockerfile`, re-review these and drop any
+  that the new image fixes; update the "Last reviewed" date. Don't add blanket
+  ignores — one CVE/GHSA id per line with a justification comment.
