@@ -21,6 +21,7 @@ import (
 	"github.com/duynhlab/user-service/middleware"
 	"github.com/duynhlab/pkg/authmw"
 	"github.com/duynhlab/pkg/grpcx"
+	"github.com/duynhlab/pkg/obsx"
 	authv1 "github.com/duynhlab/pkg/proto/auth/v1"
 )
 
@@ -44,6 +45,18 @@ func main() {
 	)
 
 	tp := initTracing(cfg, logger)
+
+	// Install global OTel MeterProvider → Prometheus default registry so the
+	// otelgrpc handlers in pkg/grpcx record gRPC RED metrics on /metrics.
+	if cfg.Metrics.Enabled {
+		shutdownMetrics, err := obsx.SetupMetrics()
+		if err != nil {
+			logger.Warn("Failed to setup OTel metrics", zap.Error(err))
+		} else {
+			logger.Info("OTel metrics provider initialized")
+			defer func() { _ = shutdownMetrics(context.Background()) }()
+		}
+	}
 
 	initProfiling(cfg, logger)
 
