@@ -6,6 +6,13 @@
 
 User management microservice. Handles user profiles and account operations.
 
+Module path: `github.com/duynhlab/user-service`.
+
+It is a gRPC **client** of `auth-service`: the shared `pkg/authmw` middleware
+validates each request's bearer token by calling `auth.v1.AuthService/GetMe`
+over gRPC (target `AUTH_GRPC_ADDR`). gRPC is the official east-west transport;
+this service exposes no gRPC server, only the HTTP API below.
+
 ## 🏗️ Architecture Guidelines
 
 ### 3-Layer Architecture
@@ -14,7 +21,7 @@ User management microservice. Handles user profiles and account operations.
 |-------|----------|----------------|
 | **Web** | `internal/web/v1/handler.go` | HTTP handling, validation, error translation |
 | **Logic** | `internal/logic/v1/service.go` | Business rules (❌ NO SQL) |
-| **Core** | `internal/core/` | Domain models, repositories, database |
+| **Core** | `internal/core/` | Domain models (`core/domain/`), repository interface + impl (`core/repository/psql/`), DB pool (`core/database.go`) |
 
 ### 3-Layer Coding Rules
 
@@ -63,13 +70,32 @@ user-service/
 ├── db/migrations/sql/
 ├── internal/
 │   ├── core/
-│   │   ├── database.go
-│   │   └── domain/
+│   │   ├── database.go          # pgxpool connect + global GetPool()
+│   │   ├── domain/             # models, errors, UserRepository interface
+│   │   └── repository/psql/    # PostgreSQL UserRepository implementation
 │   ├── logic/v1/service.go
 │   └── web/v1/handler.go
-├── middleware/
+├── middleware/                  # tracing, logging, prometheus, profiling, resource
 └── Dockerfile
 ```
+
+### Wiring (`cmd/main.go`)
+
+```
+userRepo    := psql.NewUserRepository()        // no args; uses core.GetPool()
+userService := logicv1.NewUserService(userRepo) // repo injected via constructor
+userHandler := webv1.NewUserHandler(userService)
+authConn, _ := grpcx.Dial(cfg.AuthGRPCAddr)     // gRPC client → auth-service
+authClient  := authv1.NewAuthServiceClient(authConn)
+```
+
+The `UserService` receives its repository by constructor injection. The
+repository implementation (`core/repository/psql`) currently reaches the
+connection pool through the package-global `database.GetPool()` rather than a
+pool injected into its constructor — keep that pattern unless explicitly asked
+to refactor it. `GetUser` is still a stub (returns synthesized data; `id ==
+"999"` yields `ErrUserNotFound`) because user-service does not own the `users`
+table; the profile read/write paths (`user_profiles`) hit real SQL.
 
 ## 🛠️ Development Workflow
 
@@ -109,11 +135,43 @@ go build ./... && go test ./... && golangci-lint run --timeout=10m
 
 | Component | Technology |
 |-----------|------------|
+| Language | Go 1.26 |
 | Framework | Gin |
-| Database | PostgreSQL 16 via pgx/v5 |
-| Logging | Zap |
-| Tracing | OpenTelemetry |
-| Metrics | Prometheus |
+| Database | PostgreSQL via pgx/v5 (`pgxpool`) |
+| Auth (east-west) | gRPC client of auth-service via `pkg/grpcx` + `pkg/authmw` |
+| Logging | Zap (structured, trace-correlated) |
+| Tracing | OpenTelemetry (OTLP HTTP → OTel Collector) |
+| Metrics | Prometheus (HTTP RED in-repo + gRPC client RED via `pkg/obsx`) |
+| Profiling | Pyroscope |
+| Shared libs | `github.com/duynhlab/pkg` (`authmw`, `grpcx`, `obsx`, generated `proto/auth/v1`) |
+
+### Observability (single `/metrics`)
+
+The process exposes ONE Prometheus endpoint at `/metrics`. HTTP RED metrics
+(`request_duration_seconds`, `requests_in_flight`, `request_size_bytes`,
+`response_size_bytes`) are recorded by `middleware/prometheus.go`. In `main()`,
+`obsx.SetupMetrics()` installs a global OpenTelemetry meter provider backed by a
+Prometheus exporter on the **default** registry, so the gRPC client RED metrics
+(`rpc_client_*`) from the otelgrpc handler in `pkg/grpcx` land on the **same**
+`/metrics` — there is no separate metrics port (a gRPC server would own `:9090`,
+so HTTP can't be served there). One platform ServiceMonitor scrapes it.
+
+Logging middleware derives `trace_id` from `obsx.TraceIDFromContext(ctx)` (the
+active span's ID) so logs and traces correlate; it only falls back to the
+`traceparent`/`X-Trace-ID` headers or a generated ID when no span exists.
+
+**Middleware order (do not reorder):** `TracingMiddleware → LoggingMiddleware →
+PrometheusMiddleware`. Tracing must run first so logging/metrics see the span.
+
+### gRPC auth middleware (`pkg/authmw`)
+
+`private` routes use `authmw.Middleware(authClient)`. It forwards the incoming
+`Authorization` header to `auth.v1.AuthService/GetMe` over gRPC and **fails
+closed**: no header → 401, `Unauthenticated` → 401, any other error (auth
+unreachable, internal) → 503. On success it sets `user_id`, `username`, `email`
+in the gin context — handlers read these, never parse JWTs themselves. Do not
+reintroduce per-service token parsing; the shared middleware is the single
+source of fail-closed behaviour.
 
 ## 🏗️ Infrastructure Details
 
