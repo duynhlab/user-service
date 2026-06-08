@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"os/signal"
 	"sync/atomic"
 	"syscall"
@@ -13,29 +14,42 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
+	"github.com/duynhlab/pkg/authmw"
+	"github.com/duynhlab/pkg/grpcx"
+	"github.com/duynhlab/pkg/migratex"
+	"github.com/duynhlab/pkg/obsx"
+	authv1 "github.com/duynhlab/pkg/proto/auth/v1"
 	"github.com/duynhlab/user-service/config"
+	migrations "github.com/duynhlab/user-service/db/migrations"
 	database "github.com/duynhlab/user-service/internal/core"
 	"github.com/duynhlab/user-service/internal/core/repository/psql"
 	logicv1 "github.com/duynhlab/user-service/internal/logic/v1"
 	webv1 "github.com/duynhlab/user-service/internal/web/v1"
 	"github.com/duynhlab/user-service/middleware"
-	"github.com/duynhlab/pkg/authmw"
-	"github.com/duynhlab/pkg/grpcx"
-	"github.com/duynhlab/pkg/obsx"
-	authv1 "github.com/duynhlab/pkg/proto/auth/v1"
 )
 
 func main() {
 	cfg := config.Load()
-	if err := cfg.Validate(); err != nil {
-		panic("Configuration validation failed: " + err.Error())
-	}
 
 	logger, err := middleware.NewLogger()
 	if err != nil {
 		panic("Failed to initialize logger: " + err.Error())
 	}
 	defer func() { _ = logger.Sync() }()
+
+	// `<binary> migrate` runs embedded schema migrations (init container, against
+	// the direct DB host) and exits; no args serves the app.
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		if err := migratex.Run(migrations.FS, "sql", cfg.Database.BuildDSN()); err != nil {
+			logger.Fatal("Schema migration failed", zap.Error(err))
+		}
+		logger.Info("Schema migrations applied")
+		return
+	}
+
+	if err := cfg.Validate(); err != nil {
+		panic("Configuration validation failed: " + err.Error())
+	}
 
 	logger.Info("Service starting",
 		zap.String("service", cfg.Service.Name),
