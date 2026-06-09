@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/duynhlab/user-service/internal/core/domain"
 	"github.com/jackc/pgx/v5"
@@ -20,23 +22,52 @@ func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 	return &UserRepository{pool: pool}
 }
 
-// GetUser retrieves a user by ID
-// Note: This matches the previous mock behavior in logic layer.
-// Since user-service doesn't own the 'users' table (auth-service does),
-// we can't reliably get username/email from DB here without calling Auth Service.
-// For now, we keep the mock behavior but move it to repository as the "Data Source".
+// GetUser retrieves the public view of a user by ID.
+//
+// user-service owns only the user_profiles table; the authoritative users
+// table (with username/email) lives in auth-service across a cluster boundary
+// with no FK. We therefore resolve the public Name from user_profiles and
+// leave Username/Email empty — the public endpoint omits them anyway. A
+// missing profile row maps to domain.ErrUserNotFound.
 func (r *UserRepository) GetUser(ctx context.Context, id string) (*domain.User, error) {
-	// Mock logic preserved from original service
-	if id == "999" {
-		return nil, domain.ErrUserNotFound // We need to make sure this error is available or use a standard error
+	if r.pool == nil {
+		return nil, errors.New("database connection not available")
+	}
+
+	userID, err := strconv.Atoi(id)
+	if err != nil {
+		return nil, fmt.Errorf("parse user id %q: %w", id, domain.ErrUserNotFound)
+	}
+
+	profile, err := r.GetProfileByUserID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("get user %q: %w", id, err)
+	}
+	if profile == nil {
+		return nil, domain.ErrUserNotFound
+	}
+
+	name := profileName(profile)
+	if name == "" {
+		name = "User " + id
 	}
 
 	return &domain.User{
-		ID:       id,
-		Username: "user" + id,
-		Email:    "user" + id + "@example.com",
-		Name:     "User " + id,
+		ID:   id,
+		Name: name,
 	}, nil
+}
+
+// profileName joins the profile's first and last name, skipping empty parts.
+func profileName(profile *domain.UserProfile) string {
+	parts := make([]string, 0, 2)
+	if profile.FirstName != nil && *profile.FirstName != "" {
+		parts = append(parts, *profile.FirstName)
+	}
+	if profile.LastName != nil && *profile.LastName != "" {
+		parts = append(parts, *profile.LastName)
+	}
+	return strings.Join(parts, " ")
 }
 
 // GetProfileByUserID retrieves a user profile by user ID
