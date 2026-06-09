@@ -10,4 +10,6 @@ RUN apk --no-cache add ca-certificates && apk --no-cache upgrade zlib
 WORKDIR /root/
 COPY --from=builder /app/user-service .
 EXPOSE 8080
-CMD ["./user-service"]
+# ENTRYPOINT (not CMD) so the migrate init container/compose can pass the
+# `migrate` subcommand via args while the main container serves with no args.
+ENTRYPOINT ["./user-service"]

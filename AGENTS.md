@@ -64,7 +64,7 @@ internal/
     domain/                          # models, sentinel errors, UserRepository interface
     repository/psql/                 # PostgreSQL UserRepository implementation (SQL lives here)
 middleware/                          # tracing, logging, prometheus, profiling, resource
-db/migrations/                       # Flyway SQL + migration image Dockerfile + .trivyignore
+db/migrations/                       # golang-migrate SQL (sql/000001_*.up.sql) embedded via embed.go
 Dockerfile                           # service image (distroless-style alpine)
 ```
 
@@ -182,11 +182,11 @@ Routes mount directly on the Gin router; Kong is pure pass-through for
   digests for any new image — **never `:latest`** on workloads; the cluster's
   Kyverno policies reject it.
 
-### Flyway migration image `.trivyignore`
+### Database migrations
 
-- `db/migrations/.trivyignore` suppresses **upstream** CVEs bundled in the
-  official `flyway/flyway` image (transitive JARs that can't be patched locally).
-  Each entry is annotated with the dependency and reason. When bumping the
-  Flyway base image in `db/migrations/Dockerfile`, re-review these and drop any
-  that the new image fixes; update the "Last reviewed" date. Don't add blanket
-  ignores — one CVE/GHSA id per line with a justification comment.
+- Migrations use **golang-migrate v4.19.1**, embedded in the app binary via
+  `embed.FS` (`db/migrations/embed.go`) and applied through `pkg/migratex`.
+- Forward-only SQL files live in `db/migrations/sql/` as `000001_*.up.sql`.
+- A `migrate` subcommand runs them; the init container reuses the **app image**
+  (`args: ["migrate"]`), so there is no separate migration image, Dockerfile, or
+  `.trivyignore` to maintain.
