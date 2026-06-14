@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/duynhlab/pkg/httpx"
 	"github.com/duynhlab/user-service/internal/core/domain"
 	logicv1 "github.com/duynhlab/user-service/internal/logic/v1"
 	"github.com/duynhlab/user-service/middleware"
@@ -63,9 +64,9 @@ func (h *UserHandler) GetUser(c *gin.Context) {
 
 		switch {
 		case errors.Is(err, domain.ErrUserNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			httpx.RespondError(c, http.StatusNotFound, httpx.CodeNotFound, "User not found")
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+			httpx.RespondError(c, http.StatusInternalServerError, httpx.CodeInternal, "Internal server error")
 		}
 		return
 	}
@@ -98,7 +99,7 @@ func (h *UserHandler) GetProfile(c *gin.Context) {
 	userID := c.GetString("user_id")
 	if userID == "" {
 		zapLogger.Warn("GetProfile: no user_id in context")
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+		httpx.RespondError(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "Authentication required")
 		return
 	}
 	username := c.GetString("username")
@@ -111,9 +112,9 @@ func (h *UserHandler) GetProfile(c *gin.Context) {
 
 		switch {
 		case errors.Is(err, domain.ErrUnauthorized):
-			c.JSON(http.StatusForbidden, gin.H{"error": "Unauthorized access"})
+			httpx.RespondError(c, http.StatusForbidden, httpx.CodeForbidden, "Unauthorized access")
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+			httpx.RespondError(c, http.StatusInternalServerError, httpx.CodeInternal, "Internal server error")
 		}
 		return
 	}
@@ -147,7 +148,7 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 		span.SetAttributes(attribute.Bool("request.valid", false))
 		span.RecordError(err)
 		zapLogger.Error("Invalid request", zap.Error(err))
-		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeValidationError(err)})
+		httpx.RespondError(c, http.StatusBadRequest, httpx.CodeValidation, sanitizeValidationError(err))
 		return
 	}
 
@@ -160,13 +161,13 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 
 		switch {
 		case errors.Is(err, domain.ErrUserExists):
-			c.JSON(http.StatusConflict, gin.H{"error": "User already exists"})
+			httpx.RespondError(c, http.StatusConflict, httpx.CodeConflict, "User already exists")
 		case errors.Is(err, domain.ErrInvalidEmail):
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid email address"})
+			httpx.RespondError(c, http.StatusBadRequest, httpx.CodeValidation, "Invalid email address")
 		case errors.Is(err, domain.ErrInvalidUserID):
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user id"})
+			httpx.RespondError(c, http.StatusBadRequest, httpx.CodeValidation, "Invalid user id")
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+			httpx.RespondError(c, http.StatusInternalServerError, httpx.CodeInternal, "Internal server error")
 		}
 		return
 	}
@@ -199,7 +200,7 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	userID := c.GetString("user_id")
 	if userID == "" {
 		zapLogger.Warn("UpdateProfile: no user_id in context")
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+		httpx.RespondError(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "Authentication required")
 		return
 	}
 
@@ -208,7 +209,7 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		span.SetAttributes(attribute.Bool("request.valid", false))
 		span.RecordError(err)
 		zapLogger.Error("Invalid request", zap.Error(err))
-		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeValidationError(err)})
+		httpx.RespondError(c, http.StatusBadRequest, httpx.CodeValidation, sanitizeValidationError(err))
 		return
 	}
 
@@ -221,9 +222,9 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 
 		switch {
 		case errors.Is(err, domain.ErrUnauthorized):
-			c.JSON(http.StatusForbidden, gin.H{"error": "Unauthorized access"})
+			httpx.RespondError(c, http.StatusForbidden, httpx.CodeForbidden, "Unauthorized access")
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+			httpx.RespondError(c, http.StatusInternalServerError, httpx.CodeInternal, "Internal server error")
 		}
 		return
 	}
