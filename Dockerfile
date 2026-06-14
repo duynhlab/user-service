@@ -6,7 +6,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o /app/user-service ./cmd/main.go
 
 FROM alpine:latest
-RUN apk --no-cache add ca-certificates && apk --no-cache upgrade zlib
+RUN apk --no-cache upgrade && apk --no-cache add ca-certificates
 WORKDIR /root/
 COPY --from=builder /app/user-service .
 EXPOSE 8080
