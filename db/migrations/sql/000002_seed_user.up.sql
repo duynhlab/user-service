@@ -25,3 +25,7 @@ SELECT
     'User profiles seeded' as status,
     COUNT(*) as profile_count
 FROM user_profiles;
+
+-- Sequence realignment: the seed rows above use explicit ids, so realign the
+-- sequence to MAX(id) here, or the first app-created profile collides on the PK.
+SELECT setval('user_profiles_id_seq', (SELECT MAX(id) FROM user_profiles));
