@@ -73,7 +73,9 @@ func main() {
 		}
 	}
 
-	initProfiling(cfg, logger)
+	if stopProfiling := initProfiling(cfg, logger); stopProfiling != nil {
+		defer func() { _ = stopProfiling(context.Background()) }()
+	}
 
 	pool, err := database.Connect(context.Background())
 	if err != nil {
@@ -120,16 +122,18 @@ func initTracing(cfg *config.Config, logger *zap.Logger) interface{ Shutdown(con
 	return tp
 }
 
-func initProfiling(cfg *config.Config, logger *zap.Logger) {
+func initProfiling(cfg *config.Config, logger *zap.Logger) func(context.Context) error {
 	if !cfg.Profiling.Enabled {
 		logger.Info("Profiling disabled (PROFILING_ENABLED=false)")
-		return
+		return nil
 	}
-	if err := middleware.InitProfiling(); err != nil {
+	stop, err := obsx.SetupProfiling()
+	if err != nil {
 		logger.Warn("Failed to initialize profiling", zap.Error(err))
-		return
+		return nil
 	}
 	logger.Info("Profiling initialized", zap.String("endpoint", cfg.Profiling.Endpoint))
+	return stop
 }
 
 func setupServer(cfg *config.Config, logger *zap.Logger, authClient authv1.AuthServiceClient, isShuttingDown *atomic.Bool, userHandler *webv1.UserHandler) *http.Server {
@@ -222,6 +226,5 @@ func runGracefulShutdown(
 		}
 	}
 
-	middleware.StopProfiling()
 	logger.Info("Graceful shutdown complete")
 }

@@ -16,6 +16,11 @@ intent, the code is the source of truth.
   `Generated-by`, …), issue references (`Fixes #123`), or `@`-mentions.
 - CI (`.github/workflows/check.yml`) runs `go-check` (test + lint), gitleaks,
   and sonar on every PR. Green is required.
+- Before pushing or opening a PR, verify Sonar new-code coverage ≥ 80%: run
+  `go test -race -coverprofile=coverage.out ./...` and confirm changed lines
+  are covered, including **both** branches of any new conditional.
+  `**/cmd/**`, `**/db/migrations/**`, `**/internal/core/repository/**` are
+  coverage-excluded; everything else counts.
 
 ## Code quality
 
