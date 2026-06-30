@@ -1,0 +1,209 @@
+package config
+
+import (
+	"testing"
+)
+
+// clearEnv unsets every env var Load reads, so a test starts from a known state.
+func clearEnv(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{
+		"SERVICE_NAME", "PORT", "VERSION", "ENV",
+		"TRACING_ENABLED", "OTEL_COLLECTOR_ENDPOINT", "OTEL_SAMPLE_RATE", "OTEL_BATCH_SIZE",
+		"PROFILING_ENABLED", "PYROSCOPE_ENDPOINT",
+		"LOG_LEVEL", "LOG_FORMAT",
+		"METRICS_ENABLED", "METRICS_PATH",
+		"DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD", "DB_SSLMODE",
+		"DB_POOL_MAX_CONNECTIONS", "DB_POOL_MODE", "DB_POOLER_TYPE",
+		"SHUTDOWN_TIMEOUT", "READINESS_DRAIN_DELAY", "AUTH_GRPC_ADDR",
+	} {
+		t.Setenv(k, "")
+	}
+}
+
+func TestLoadDefaults(t *testing.T) {
+	clearEnv(t)
+	c := Load()
+	if c.Service.Port != "8080" {
+		t.Errorf("Port = %q, want 8080", c.Service.Port)
+	}
+	if c.Service.Name != defaultServiceName {
+		t.Errorf("Name = %q, want %q", c.Service.Name, defaultServiceName)
+	}
+	if !c.Tracing.Enabled {
+		t.Error("Tracing.Enabled = false, want true")
+	}
+	if c.Tracing.SampleRate != 0.1 {
+		t.Errorf("SampleRate = %v, want 0.1", c.Tracing.SampleRate)
+	}
+	if c.Tracing.MaxExportBatchSize != 512 {
+		t.Errorf("MaxExportBatchSize = %d, want 512", c.Tracing.MaxExportBatchSize)
+	}
+	if c.ShutdownTimeout != 10 {
+		t.Errorf("ShutdownTimeout = %d, want 10", c.ShutdownTimeout)
+	}
+	if c.ReadinessDrainDelay != 5 {
+		t.Errorf("ReadinessDrainDelay = %d, want 5", c.ReadinessDrainDelay)
+	}
+}
+
+func TestLoadFromEnv(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("SERVICE_NAME", "user")
+	t.Setenv("PORT", "9000")
+	t.Setenv("ENV", "production")
+	t.Setenv("TRACING_ENABLED", "false")
+	t.Setenv("OTEL_SAMPLE_RATE", "0.5")
+	t.Setenv("OTEL_BATCH_SIZE", "256")
+	t.Setenv("METRICS_ENABLED", "no")
+	t.Setenv("SHUTDOWN_TIMEOUT", "20s")
+	t.Setenv("READINESS_DRAIN_DELAY", "999s") // over max(30) -> default 5
+	c := Load()
+	if c.Service.Name != "user" || c.Service.Port != "9000" || c.Service.Env != "production" {
+		t.Errorf("service = %+v", c.Service)
+	}
+	if c.Tracing.Enabled {
+		t.Error("Tracing.Enabled = true, want false")
+	}
+	if c.Tracing.SampleRate != 0.5 || c.Tracing.MaxExportBatchSize != 256 {
+		t.Errorf("tracing = %+v", c.Tracing)
+	}
+	if c.Metrics.Enabled {
+		t.Error("Metrics.Enabled = true, want false")
+	}
+	if c.ShutdownTimeout != 20 {
+		t.Errorf("ShutdownTimeout = %d, want 20", c.ShutdownTimeout)
+	}
+	if c.ReadinessDrainDelay != 5 {
+		t.Errorf("ReadinessDrainDelay = %d, want 5 (over-max falls back)", c.ReadinessDrainDelay)
+	}
+}
+
+func validConfig() *Config {
+	c := &Config{}
+	c.Service.Name = "user"
+	c.Service.Port = "8080"
+	c.Service.Env = "production"
+	c.Tracing.Enabled = true
+	c.Tracing.Endpoint = "otel:4318"
+	c.Tracing.SampleRate = 0.1
+	c.Tracing.ServiceName = "user"
+	c.Profiling.Enabled = true
+	c.Profiling.Endpoint = "pyro:4040"
+	c.Profiling.ServiceName = "user"
+	c.Logging.Level = "info"
+	c.Logging.Format = "json"
+	return c
+}
+
+func TestValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*Config)
+		wantErr bool
+	}{
+		{"valid", func(*Config) {}, false},
+		{"missing service name", func(c *Config) { c.Service.Name = "" }, true},
+		{"default service name", func(c *Config) { c.Service.Name = defaultServiceName }, true},
+		{"empty port", func(c *Config) { c.Service.Port = "" }, true},
+		{"non-numeric port", func(c *Config) { c.Service.Port = "abc" }, true},
+		{"bad env", func(c *Config) { c.Service.Env = "qa" }, true},
+		{"tracing endpoint empty", func(c *Config) { c.Tracing.Endpoint = "" }, true},
+		{"sample rate too high", func(c *Config) { c.Tracing.SampleRate = 2 }, true},
+		{"tracing disabled skips checks", func(c *Config) { c.Tracing.Enabled = false; c.Tracing.Endpoint = "" }, false},
+		{"profiling endpoint empty", func(c *Config) { c.Profiling.Endpoint = "" }, true},
+		{"bad log level", func(c *Config) { c.Logging.Level = "trace" }, true},
+		{"bad log format", func(c *Config) { c.Logging.Format = "xml" }, true},
+		{"db host set, name missing", func(c *Config) { c.Database.Host = "h"; c.Database.User = "u"; c.Database.Password = "p" }, true},
+		{"db host set, complete", func(c *Config) {
+			c.Database.Host = "h"
+			c.Database.Name = "n"
+			c.Database.User = "u"
+			c.Database.Password = "p"
+			c.Database.Port = "5432"
+		}, false},
+		{"db bad port", func(c *Config) {
+			c.Database.Host = "h"
+			c.Database.Name = "n"
+			c.Database.User = "u"
+			c.Database.Password = "p"
+			c.Database.Port = "abc"
+		}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := validConfig()
+			tt.mutate(c)
+			err := c.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() err = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestBuildDSN(t *testing.T) {
+	db := &DatabaseConfig{Host: "localhost", Port: "5432", Name: "user", User: "user", Password: "secret", SSLMode: "disable"}
+	got := db.BuildDSN()
+	want := "postgresql://user:secret@localhost:5432/user?sslmode=disable"
+	if got != want {
+		t.Errorf("BuildDSN() = %q, want %q", got, want)
+	}
+}
+
+func TestEnvHelpers(t *testing.T) {
+	clearEnv(t)
+	if getEnv("PORT", "x") != "x" {
+		t.Error("getEnv default failed")
+	}
+	t.Setenv("PORT", "1")
+	if getEnv("PORT", "x") != "1" {
+		t.Error("getEnv value failed")
+	}
+	t.Setenv("TRACING_ENABLED", "yes")
+	if !getEnvBool("TRACING_ENABLED", false) {
+		t.Error("getEnvBool yes failed")
+	}
+	if getEnvInt("OTEL_BATCH_SIZE", 7) != 7 {
+		t.Error("getEnvInt default failed")
+	}
+	t.Setenv("OTEL_BATCH_SIZE", "bad")
+	if getEnvInt("OTEL_BATCH_SIZE", 7) != 7 {
+		t.Error("getEnvInt bad-value fallback failed")
+	}
+	t.Setenv("OTEL_SAMPLE_RATE", "bad")
+	if getEnvFloat("OTEL_SAMPLE_RATE", 0.2) != 0.2 {
+		t.Error("getEnvFloat bad-value fallback failed")
+	}
+	if getEnvDurationSeconds("SHUTDOWN_TIMEOUT", 10) != 10 {
+		t.Error("getEnvDurationSeconds default failed")
+	}
+	t.Setenv("SHUTDOWN_TIMEOUT", "bad")
+	if getEnvDurationSeconds("SHUTDOWN_TIMEOUT", 10) != 10 {
+		t.Error("getEnvDurationSeconds bad fallback failed")
+	}
+	t.Setenv("SHUTDOWN_TIMEOUT", "999s") // over max
+	if getEnvDurationSeconds("SHUTDOWN_TIMEOUT", 10) != 10 {
+		t.Error("getEnvDurationSeconds over-max fallback failed")
+	}
+}
+
+func TestEnvironmentPredicatesAndDurations(t *testing.T) {
+	c := &Config{}
+	c.Service.Env = "dev"
+	if !c.IsDevelopment() || c.IsProduction() {
+		t.Error("dev predicates wrong")
+	}
+	c.Service.Env = "prod"
+	if c.IsDevelopment() || !c.IsProduction() {
+		t.Error("prod predicates wrong")
+	}
+	c.ShutdownTimeout = 15
+	if c.GetShutdownTimeoutDuration().Seconds() != 15 {
+		t.Error("GetShutdownTimeoutDuration wrong")
+	}
+	c.ReadinessDrainDelay = 5
+	if c.GetReadinessDrainDelayDuration().Seconds() != 5 {
+		t.Error("GetReadinessDrainDelayDuration wrong")
+	}
+}
