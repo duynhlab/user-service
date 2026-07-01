@@ -107,6 +107,9 @@ type DatabaseConfig struct {
 // BuildDSN constructs PostgreSQL connection string from config
 func (c *DatabaseConfig) BuildDSN() string {
 	// Format: postgresql://user:password@host:port/dbname?sslmode=disable
+	// Pool sizing is NOT in the DSN — it's applied on the parsed pgxpool.Config in
+	// database.Connect, so the migrate subcommand (whose pgx stdlib driver rejects
+	// pool_* params) can share this exact DSN.
 	hostPort := net.JoinHostPort(c.Host, c.Port)
 	return fmt.Sprintf("postgresql://%s:%s@%s/%s?sslmode=%s",
 		c.User, c.Password, hostPort, c.Name, c.SSLMode)
