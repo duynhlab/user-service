@@ -100,8 +100,16 @@ func main() {
 	authClient := authv1.NewAuthServiceClient(authConn)
 	logger.Info("Auth gRPC client initialized", zap.String("auth_grpc_addr", cfg.AuthGRPCAddr))
 
+	// Local RS256 JWT verification (cached JWKS); opaque tokens fall back to the
+	// gRPC GetMe path above. NewVerifier refreshes in the background and does not
+	// block on an unreachable JWKS, so it is safe to build at startup.
+	verifier, err := authmw.NewVerifier(cfg.JWKSURL, cfg.JWTIssuer, cfg.JWTAudience)
+	if err != nil {
+		logger.Warn("Failed to initialize JWT verifier; falling back to gRPC token validation", zap.Error(err))
+	}
+
 	var isShuttingDown atomic.Bool
-	srv := setupServer(cfg, logger, authClient, &isShuttingDown, userHandler)
+	srv := setupServer(cfg, logger, verifier, authClient, &isShuttingDown, userHandler)
 	runGracefulShutdown(cfg, srv, tp, pool, logger, &isShuttingDown)
 }
 
@@ -136,7 +144,7 @@ func initProfiling(cfg *config.Config, logger *zap.Logger) func(context.Context)
 	return stop
 }
 
-func setupServer(cfg *config.Config, logger *zap.Logger, authClient authv1.AuthServiceClient, isShuttingDown *atomic.Bool, userHandler *webv1.UserHandler) *http.Server {
+func setupServer(cfg *config.Config, logger *zap.Logger, verifier *authmw.Verifier, authClient authv1.AuthServiceClient, isShuttingDown *atomic.Bool, userHandler *webv1.UserHandler) *http.Server {
 	r := gin.Default()
 
 	r.Use(middleware.TracingMiddleware())
@@ -159,7 +167,7 @@ func setupServer(cfg *config.Config, logger *zap.Logger, authClient authv1.AuthS
 	r.GET("/user/v1/public/users/:id", userHandler.GetUser)
 
 	privateUsers := r.Group("/user/v1/private/users")
-	privateUsers.Use(authmw.Middleware(authClient))
+	privateUsers.Use(authmw.MiddlewareJWT(verifier, authClient))
 	{
 		privateUsers.GET("/profile", userHandler.GetProfile)
 		privateUsers.PUT("/profile", userHandler.UpdateProfile)
