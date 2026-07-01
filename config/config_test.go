@@ -143,7 +143,7 @@ func TestValidate(t *testing.T) {
 }
 
 func TestBuildDSN(t *testing.T) {
-	db := &DatabaseConfig{Host: "localhost", Port: "5432", Name: "user", User: "user", Password: "secret", SSLMode: "disable"}
+	db := &DatabaseConfig{Host: "localhost", Port: "5432", Name: "user", User: "user", Password: "secret", SSLMode: "disable", MaxConnections: 25}
 	got := db.BuildDSN()
 	want := "postgresql://user:secret@localhost:5432/user?sslmode=disable"
 	if got != want {

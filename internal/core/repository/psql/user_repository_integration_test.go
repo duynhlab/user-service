@@ -1,8 +1,8 @@
 //go:build integration
 
 // Integration tests for the PostgreSQL UserRepository. They run a real Postgres
-// via testcontainers-go and apply the service's migrations (schema + seed), so
-// they exercise the actual SQL (not a mock). Run with:
+// via testcontainers-go and apply the service's schema migrations plus the
+// dev-only demo seed, so they exercise the actual SQL (not a mock). Run with:
 //
 //	go test -tags=integration ./internal/core/repository/...
 //
@@ -51,6 +51,7 @@ func newTestDB(t *testing.T) *pgxpool.Pool {
 	}
 
 	applyMigrations(t, ctx, dsn)
+	applySeed(t, ctx, dsn)
 
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
@@ -60,9 +61,22 @@ func newTestDB(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-// applyMigrations runs every db/migrations/sql/*.up.sql in lexical order using a
-// simple-protocol connection (so multi-statement files execute in one round).
+// applyMigrations runs every db/migrations/sql/*.up.sql in lexical order.
 func applyMigrations(t *testing.T, ctx context.Context, dsn string) {
+	t.Helper()
+	applySQLDir(t, ctx, dsn, filepath.Join("..", "..", "..", "..", "db", "migrations", "sql"))
+}
+
+// applySeed applies the dev-only demo seed (db/seed/sql) — it lives outside the
+// migration chain, so read-path tests must load it explicitly here.
+func applySeed(t *testing.T, ctx context.Context, dsn string) {
+	t.Helper()
+	applySQLDir(t, ctx, dsn, filepath.Join("..", "..", "..", "..", "db", "seed", "sql"))
+}
+
+// applySQLDir runs every *.up.sql in dir in lexical order using a simple-protocol
+// connection (so multi-statement files execute in one round).
+func applySQLDir(t *testing.T, ctx context.Context, dsn, dir string) {
 	t.Helper()
 	cfg, err := pgx.ParseConfig(dsn)
 	if err != nil {
@@ -71,14 +85,13 @@ func applyMigrations(t *testing.T, ctx context.Context, dsn string) {
 	cfg.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
 	conn, err := pgx.ConnectConfig(ctx, cfg)
 	if err != nil {
-		t.Fatalf("connect for migrations: %v", err)
+		t.Fatalf("connect for %s: %v", dir, err)
 	}
 	defer conn.Close(ctx)
 
-	dir := filepath.Join("..", "..", "..", "..", "db", "migrations", "sql")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		t.Fatalf("read migrations dir: %v", err)
+		t.Fatalf("read dir %s: %v", dir, err)
 	}
 	var files []string
 	for _, e := range entries {
@@ -93,7 +106,7 @@ func applyMigrations(t *testing.T, ctx context.Context, dsn string) {
 			t.Fatalf("read %s: %v", f, err)
 		}
 		if _, err := conn.Exec(ctx, string(sqlBytes)); err != nil {
-			t.Fatalf("apply migration %s: %v", f, err)
+			t.Fatalf("apply %s: %v", f, err)
 		}
 	}
 }

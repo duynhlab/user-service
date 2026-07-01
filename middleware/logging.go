@@ -98,8 +98,9 @@ func LoggingMiddleware(logger *zap.Logger) gin.HandlerFunc {
 		duration := time.Since(start)
 		statusCode := c.Writer.Status()
 
-		// Log request/response
-		logger.Info("HTTP request",
+		// One structured log per request; level chosen by status class so a
+		// single line carries the request outcome (no duplicate Info+Error).
+		fields := []zap.Field{
 			zap.String("trace_id", traceID),
 			zap.String("method", method),
 			zap.String("path", path),
@@ -107,18 +108,21 @@ func LoggingMiddleware(logger *zap.Logger) gin.HandlerFunc {
 			zap.Duration("duration", duration),
 			zap.String("client_ip", c.ClientIP()),
 			zap.String("user_agent", c.Request.UserAgent()),
-		)
-
-		// Log errors (4xx, 5xx) with error level
-		if statusCode >= 400 {
-			logger.Error("HTTP error",
-				zap.String("trace_id", traceID),
-				zap.String("method", method),
-				zap.String("path", path),
-				zap.Int("status", statusCode),
-				zap.Duration("duration", duration),
-			)
 		}
+		logByStatus(logger, statusCode, fields)
+	}
+}
+
+// logByStatus emits a single request log at the level appropriate for the HTTP
+// status: Error for 5xx, Warn for 4xx, Info otherwise.
+func logByStatus(logger *zap.Logger, statusCode int, fields []zap.Field) {
+	switch {
+	case statusCode >= 500:
+		logger.Error("HTTP request", fields...)
+	case statusCode >= 400:
+		logger.Warn("HTTP request", fields...)
+	default:
+		logger.Info("HTTP request", fields...)
 	}
 }
 
