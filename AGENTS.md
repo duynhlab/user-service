@@ -41,19 +41,20 @@ User-management microservice: user lookup and profile read/write. HTTP-only
 public surface (Gin); no gRPC server.
 
 - Module: `github.com/duynhlab/user-service`.
-- gRPC **client** of `auth-service` for token validation (see Conventions).
-- Shared libs from `github.com/duynhlab/pkg` (`authmw`, `grpcx`, `obsx`,
-  generated `proto/auth/v1`).
+- Token validation is **local RS256 JWT verification** against auth-service's
+  JWKS (see Conventions) — no gRPC client, no per-request call to auth.
+- Shared libs from `github.com/duynhlab/pkg` (`authmw`, `obsx`, `migratex`,
+  `zapx`).
 
 | Component | Technology |
 |-----------|------------|
 | Language  | Go 1.26 |
 | Framework | Gin |
 | Database  | PostgreSQL 16 via `pgx/v5` (`pgxpool`) |
-| Auth      | gRPC client of `auth-service` (`pkg/authmw`, `pkg/grpcx`) |
+| Auth      | Local RS256 JWT verification via JWKS (`pkg/authmw`) |
 | Logging   | Zap (structured, trace-correlated) |
 | Tracing   | OpenTelemetry (OTLP → OTel Collector) |
-| Metrics   | Prometheus (HTTP RED in-repo + gRPC client RED via `pkg/obsx`) |
+| Metrics   | Prometheus (HTTP RED in-repo, OTel bridge via `pkg/obsx`) |
 | Profiling | Pyroscope |
 
 ## Repository layout
@@ -121,27 +122,30 @@ from `web` or `logic`.
 - Web must call Logic, never `core/repository` directly. Logic must not skip to
   the pool.
 
-### gRPC client → auth (`pkg/authmw`)
+### JWT verification (`pkg/authmw`)
 
-`user-service` is a gRPC **client** of `auth-service`; it runs no gRPC server.
+`user-service` verifies tokens locally; it runs no gRPC server or client.
 
-- `private` routes use `authmw.Middleware(authClient)`. It forwards the incoming
-  `Authorization` header to `auth.v1.AuthService/GetMe` over gRPC.
-- Target is `AUTH_GRPC_ADDR` (default `dns:///auth.auth.svc.cluster.local:9090`),
-  dialled via `pkg/grpcx`.
-- **Fail-closed**: no header → 401; `Unauthenticated` → 401; any other error
-  (auth unreachable, internal) → 503.
+- `private` routes use `authmw.MiddlewareJWT(verifier)`. It verifies the
+  incoming `Authorization` bearer token as an RS256 JWT against auth-service's
+  JWKS — cached, refreshed in the background, no per-request call to auth and
+  no fallback path.
+- Config: `AUTH_JWKS_URL` (default
+  `http://auth.auth.svc.cluster.local:8080/auth/v1/public/jwks`),
+  `JWT_ISSUER`, `JWT_AUDIENCE`. The verifier failing to initialise is **fatal**
+  at startup — the service must not run unable to verify.
+- **Fail-closed**: no header → 401; invalid/expired token → 401.
 - On success it sets `user_id`, `username`, `email` in the gin context —
-  handlers read these. Do **not** parse JWTs per-service; the shared middleware
+  handlers read these. Do **not** hand-roll JWT parsing; the shared middleware
   is the single source of fail-closed behaviour.
 
 ### Observability (`pkg/obsx`, single `/metrics`)
 
 - One Prometheus endpoint at `/metrics`. HTTP RED metrics come from
   `middleware/prometheus.go`. In `main()`, `obsx.SetupMetrics()` installs a
-  global OTel meter provider on the **default** Prometheus registry so the
-  otelgrpc handler in `pkg/grpcx` lands gRPC client RED metrics (`rpc_client_*`)
-  on the **same** `/metrics`. No separate metrics port.
+  global OTel meter provider on the **default** Prometheus registry so any
+  OTel-instrumented metrics land on the **same** `/metrics`. No separate
+  metrics port.
 - Logging derives `trace_id` from `obsx.TraceIDFromContext(ctx)` so logs and
   traces correlate; header / generated-ID fallback only when no span exists.
 - Middleware order — **do not reorder**:
@@ -160,7 +164,7 @@ Use **Mermaid** for all diagrams. No ASCII art.
 flowchart LR
     Web[web/v1] --> Logic[logic/v1] --> Core[core + repository/psql] --> DB[(PostgreSQL)]
     Web -- "private routes" --> AuthMW[pkg/authmw]
-    AuthMW -- "GetMe over gRPC" --> Auth[(auth-service)]
+    AuthMW -- "JWKS fetch (cached)" --> Auth[(auth-service)]
 ```
 
 ### Routes (Variant A — `/{service}/v1/{audience}/…`)

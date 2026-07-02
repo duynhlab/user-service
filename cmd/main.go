@@ -21,11 +21,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/duynhlab/pkg/authmw"
-	"github.com/duynhlab/pkg/grpcx"
 	"github.com/duynhlab/pkg/logger/zapx"
 	"github.com/duynhlab/pkg/migratex"
 	"github.com/duynhlab/pkg/obsx"
-	authv1 "github.com/duynhlab/pkg/proto/auth/v1"
 	"github.com/duynhlab/user-service/config"
 	migrations "github.com/duynhlab/user-service/db/migrations"
 	seed "github.com/duynhlab/user-service/db/seed"
@@ -64,8 +62,8 @@ func main() {
 
 	tp := initTracing(cfg, logger)
 
-	// Install global OTel MeterProvider → Prometheus default registry so the
-	// otelgrpc handlers in pkg/grpcx record gRPC RED metrics on /metrics.
+	// Install global OTel MeterProvider → Prometheus default registry so any
+	// OTel-instrumented metrics land on /metrics.
 	if cfg.Metrics.Enabled {
 		shutdownMetrics, err := obsx.SetupMetrics()
 		if err != nil {
@@ -93,26 +91,16 @@ func main() {
 	userService := logicv1.NewUserService(userRepo)
 	userHandler := webv1.NewUserHandler(userService)
 
-	// Validate tokens against auth over gRPC (shared fail-closed authmw).
-	authConn, err := grpcx.Dial(cfg.AuthGRPCAddr)
-	if err != nil {
-		logger.Error("Failed to dial auth gRPC", zap.String("addr", cfg.AuthGRPCAddr), zap.Error(err))
-		return
-	}
-	defer func() { _ = authConn.Close() }()
-	authClient := authv1.NewAuthServiceClient(authConn)
-	logger.Info("Auth gRPC client initialized", zap.String("auth_grpc_addr", cfg.AuthGRPCAddr))
-
-	// Local RS256 JWT verification (cached JWKS); opaque tokens fall back to the
-	// gRPC GetMe path above. NewVerifier refreshes in the background and does not
+	// Local RS256 JWT verification (cached JWKS) is the only credential — no
+	// gRPC fallback. NewVerifier refreshes in the background and does not
 	// block on an unreachable JWKS, so it is safe to build at startup.
 	verifier, err := authmw.NewVerifier(cfg.JWKSURL, cfg.JWTIssuer, cfg.JWTAudience)
 	if err != nil {
-		logger.Warn("Failed to initialize JWT verifier; falling back to gRPC token validation", zap.Error(err))
+		logger.Fatal("Failed to initialize JWT verifier", zap.Error(err))
 	}
 
 	var isShuttingDown atomic.Bool
-	srv := setupServer(cfg, logger, verifier, authClient, &isShuttingDown, userHandler)
+	srv := setupServer(cfg, logger, verifier, &isShuttingDown, userHandler)
 	runGracefulShutdown(cfg, srv, tp, pool, logger, &isShuttingDown)
 }
 
@@ -219,7 +207,7 @@ func initProfiling(cfg *config.Config, logger *zap.Logger) func(context.Context)
 	return stop
 }
 
-func setupServer(cfg *config.Config, logger *zap.Logger, verifier *authmw.Verifier, authClient authv1.AuthServiceClient, isShuttingDown *atomic.Bool, userHandler *webv1.UserHandler) *http.Server {
+func setupServer(cfg *config.Config, logger *zap.Logger, verifier *authmw.Verifier, isShuttingDown *atomic.Bool, userHandler *webv1.UserHandler) *http.Server {
 	r := gin.Default()
 
 	r.Use(middleware.TracingMiddleware())
@@ -242,7 +230,7 @@ func setupServer(cfg *config.Config, logger *zap.Logger, verifier *authmw.Verifi
 	r.GET("/user/v1/public/users/:id", userHandler.GetUser)
 
 	privateUsers := r.Group("/user/v1/private/users")
-	privateUsers.Use(authmw.MiddlewareJWT(verifier, authClient))
+	privateUsers.Use(authmw.MiddlewareJWT(verifier))
 	{
 		privateUsers.GET("/profile", userHandler.GetProfile)
 		privateUsers.PUT("/profile", userHandler.UpdateProfile)
