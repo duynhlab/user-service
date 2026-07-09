@@ -17,7 +17,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
 	"github.com/duynhlab/pkg/authmw"
@@ -60,24 +59,9 @@ func main() {
 		zap.String("port", cfg.Service.Port),
 	)
 
-	// Initialize the OTel→Prometheus bridge FIRST (OTel-instrumented metrics on
-	// the scraped /metrics endpoint — the flag-off status quo). When
-	// OTEL_METRICS_ENABLED=true, SetupObservability below installs the OTLP
-	// MeterProvider as the global AFTER this, deliberately superseding the
-	// bridge (RFC-0014 dual-emit: client_golang scrape stays untouched either
-	// way; only the OTel-instrumented metrics switch transport).
-	if cfg.Metrics.Enabled {
-		shutdownMetrics, err := obsx.SetupMetrics()
-		if err != nil {
-			logger.Warn("Failed to setup OTel metrics", zap.Error(err))
-		} else {
-			logger.Info("OTel metrics provider initialized")
-			defer func() { _ = shutdownMetrics(context.Background()) }()
-		}
-	}
-
 	// RFC-0014: single OTel wiring point — traces per TRACING_ENABLED, OTLP
-	// metrics/logs behind OTEL_METRICS_ENABLED/OTEL_LOGS_ENABLED (default off).
+	// metrics (the only pipeline since the P3 cutover; OTEL_METRICS_ENABLED
+	// defaults on, =false is a kill switch), logs behind OTEL_LOGS_ENABLED.
 	// The config is built once so the tracer scope name and the startup log
 	// reflect the values obsx actually uses.
 	otelCfg := obsx.ConfigFromEnv()
@@ -218,7 +202,6 @@ func setupServer(cfg *config.Config, logger *zap.Logger, verifier *authmw.Verifi
 
 	r.Use(middleware.TracingMiddleware())
 	r.Use(middleware.LoggingMiddleware(logger))
-	r.Use(middleware.PrometheusMiddleware())
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
@@ -230,7 +213,6 @@ func setupServer(cfg *config.Config, logger *zap.Logger, verifier *authmw.Verifi
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
-	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	// User v1 routes — Variant A edge naming (see api-naming-convention.md)
 	r.GET("/user/v1/public/users/:id", userHandler.GetUser)
