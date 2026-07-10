@@ -4,9 +4,9 @@ User management microservice for profiles and account operations.
 
 ## Features
 
-- User profile management
-- Account operations
-- User search
+- User profile management (private read/update, JWT-scoped; partial update preserves unset fields)
+- Public minimal profile view (`id` + `name` — no PII)
+- Internal profile create (reserved — no in-cluster caller today)
 
 ## API Endpoints
 
