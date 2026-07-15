@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -34,25 +35,18 @@ func NewUserHandler(service *logicv1.UserService) *UserHandler {
 	}
 }
 
+// beginRequest resolves the otelgin server span and the request logger. The web
+// layer does not mint its own span — otelgin already opened the server span for
+// this request (method/route are on it), so handlers annotate that span via the
+// returned handle. The caller must NOT end it; otelgin owns its lifecycle.
+func beginRequest(c *gin.Context) (context.Context, trace.Span, *zap.Logger) {
+	ctx := c.Request.Context()
+	return ctx, trace.SpanFromContext(ctx), middleware.GetLoggerFromGinContext(c)
+}
+
 // GetUser handles HTTP request to get a user by ID
 func (h *UserHandler) GetUser(c *gin.Context) {
-	ctx, span := middleware.StartSpan(c.Request.Context(), "http.request", trace.WithAttributes(
-		attribute.String("layer", "web"),
-		attribute.String("method", c.Request.Method),
-		attribute.String("path", c.Request.URL.Path),
-	))
-	defer span.End()
-
-	loggerVal, exists := c.Get("logger")
-	var zapLogger *zap.Logger
-	if exists {
-		if l, ok := loggerVal.(*zap.Logger); ok {
-			zapLogger = l
-		}
-	}
-	if zapLogger == nil {
-		zapLogger, _ = middleware.NewLogger()
-	}
+	ctx, span, zapLogger := beginRequest(c)
 
 	id := c.Param("id")
 	span.SetAttributes(attribute.String("user.id", id))
@@ -77,23 +71,7 @@ func (h *UserHandler) GetUser(c *gin.Context) {
 
 // GetProfile handles HTTP request to get current user profile
 func (h *UserHandler) GetProfile(c *gin.Context) {
-	ctx, span := middleware.StartSpan(c.Request.Context(), "http.request", trace.WithAttributes(
-		attribute.String("layer", "web"),
-		attribute.String("method", c.Request.Method),
-		attribute.String("path", c.Request.URL.Path),
-	))
-	defer span.End()
-
-	loggerVal, exists := c.Get("logger")
-	var zapLogger *zap.Logger
-	if exists {
-		if l, ok := loggerVal.(*zap.Logger); ok {
-			zapLogger = l
-		}
-	}
-	if zapLogger == nil {
-		zapLogger, _ = middleware.NewLogger()
-	}
+	ctx, span, zapLogger := beginRequest(c)
 
 	// Extract user info from auth middleware context (required - no fallback)
 	userID := c.GetString("user_id")
@@ -125,23 +103,7 @@ func (h *UserHandler) GetProfile(c *gin.Context) {
 
 // CreateUser handles HTTP request to create a new user
 func (h *UserHandler) CreateUser(c *gin.Context) {
-	ctx, span := middleware.StartSpan(c.Request.Context(), "http.request", trace.WithAttributes(
-		attribute.String("layer", "web"),
-		attribute.String("method", c.Request.Method),
-		attribute.String("path", c.Request.URL.Path),
-	))
-	defer span.End()
-
-	loggerVal, exists := c.Get("logger")
-	var zapLogger *zap.Logger
-	if exists {
-		if l, ok := loggerVal.(*zap.Logger); ok {
-			zapLogger = l
-		}
-	}
-	if zapLogger == nil {
-		zapLogger, _ = middleware.NewLogger()
-	}
+	ctx, span, zapLogger := beginRequest(c)
 
 	var req domain.CreateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -178,23 +140,7 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 
 // UpdateProfile handles PUT /user/v1/private/users/profile
 func (h *UserHandler) UpdateProfile(c *gin.Context) {
-	ctx, span := middleware.StartSpan(c.Request.Context(), "http.request", trace.WithAttributes(
-		attribute.String("layer", "web"),
-		attribute.String("method", c.Request.Method),
-		attribute.String("path", c.Request.URL.Path),
-	))
-	defer span.End()
-
-	loggerVal, exists := c.Get("logger")
-	var zapLogger *zap.Logger
-	if exists {
-		if l, ok := loggerVal.(*zap.Logger); ok {
-			zapLogger = l
-		}
-	}
-	if zapLogger == nil {
-		zapLogger, _ = middleware.NewLogger()
-	}
+	ctx, span, zapLogger := beginRequest(c)
 
 	// Get user_id from auth middleware (required - no fallback)
 	userID := c.GetString("user_id")
