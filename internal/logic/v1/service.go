@@ -113,8 +113,6 @@ func (s *UserService) GetProfile(ctx context.Context, userID string, username, e
 func (s *UserService) CreateUser(ctx context.Context, req domain.CreateUserRequest) (*domain.User, error) {
 	ctx, span := middleware.StartSpan(ctx, "user.create", trace.WithAttributes(
 		attribute.String("layer", "logic"),
-		attribute.String("username", req.Username),
-		attribute.String("email", req.Email),
 	))
 	defer span.End()
 
