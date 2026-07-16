@@ -2,6 +2,7 @@ package v1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -35,12 +36,18 @@ func (s *UserService) GetUser(ctx context.Context, id string) (*domain.User, err
 	user, err := s.repo.GetUser(ctx, id)
 	if err != nil {
 		span.SetAttributes(attribute.Bool("user.found", false))
+		// A missing profile is a bounded "miss"; other errors are internal
+		// failures counted via the DB span, not this business counter.
+		if errors.Is(err, domain.ErrUserNotFound) {
+			recordProfileLookup(ctx, audiencePublic, false)
+		}
 		// If it's a "not found" error, we might want to wrap it differently
 		// For now, adhering to original logic which mock-failed on "999"
 		return nil, fmt.Errorf("get user by id %q: %w", id, err)
 	}
 
 	span.SetAttributes(attribute.Bool("user.found", true))
+	recordProfileLookup(ctx, audiencePublic, true)
 	return user, nil
 }
 
@@ -70,6 +77,7 @@ func (s *UserService) GetProfile(ctx context.Context, userID string, username, e
 	// If no profile found, return auth data (legacy/fallback behavior)
 	if profile == nil {
 		span.SetAttributes(attribute.Bool("profile.found", false))
+		recordProfileLookup(ctx, audiencePrivate, false)
 		return &domain.User{
 			ID:       userID,
 			Username: username,
@@ -106,6 +114,7 @@ func (s *UserService) GetProfile(ctx context.Context, userID string, username, e
 	}
 
 	span.SetAttributes(attribute.Bool("profile.found", true))
+	recordProfileLookup(ctx, audiencePrivate, true)
 	return user, nil
 }
 
@@ -185,6 +194,7 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID string, req doma
 	uid, err := strconv.Atoi(userID)
 	if err != nil {
 		span.SetAttributes(attribute.Bool("profile.updated", false))
+		recordProfileUpdated(ctx, resultUnauthorized)
 		return nil, fmt.Errorf("invalid user_id %q: %w", userID, domain.ErrUnauthorized)
 	}
 
@@ -211,5 +221,6 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID string, req doma
 	}
 
 	span.SetAttributes(attribute.Bool("profile.updated", true))
+	recordProfileUpdated(ctx, resultSuccess)
 	return user, nil
 }
