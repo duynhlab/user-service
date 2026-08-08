@@ -78,21 +78,33 @@ func LoggingMiddleware(logger *zap.Logger) gin.HandlerFunc {
 		path := c.Request.URL.Path
 		method := c.Request.Method
 
-		// Get or generate trace-id
-		traceID := GetTraceID(c)
+		// spanTraceID is the ONLY id that may reach telemetry: the active span's,
+		// or empty. This middleware previously logged GetTraceID's value, which
+		// never consults the span — so a log line could advertise an id that is
+		// not the trace id, and a search by it finds nothing in the backend even
+		// when a trace exists. Probes have no span by design (TracingMiddleware
+		// skips them), so their records carry no trace_id.
+		spanTraceID := obsx.TraceIDFromContext(c.Request.Context())
 
-		// Store trace-id in context for handlers to use
-		c.Set("trace_id", traceID)
+		// The response header keeps its previous behaviour, generated fallback
+		// included: correlate-by-header is a client contract, separate from what
+		// this service puts in its own telemetry.
+		headerTraceID := spanTraceID
+		if headerTraceID == "" {
+			headerTraceID = GetTraceID(c)
+		}
+		c.Set("trace_id", headerTraceID)
+		c.Header(TraceIDHeader, headerTraceID)
 
-		// Store logger in context for handlers to use. TraceContext binds the
-		// request context so the otelzap bridge also stamps the native
-		// trace_id/span_id on every OTLP log record (the string field stays for
-		// stdout readability). Request-scoped logger, so binding ctx is safe.
-		loggerWithTrace := logger.With(zap.String("trace_id", traceID), obsx.TraceContext(c.Request.Context()))
+		// The request logger always carries the trace CONTEXT so the otelzap
+		// bridge stamps the native trace_id/span_id on every OTLP record. The
+		// readable string field is bound only when a span exists.
+		withFields := []zap.Field{obsx.TraceContext(c.Request.Context())}
+		if spanTraceID != "" {
+			withFields = append(withFields, zap.String("trace_id", spanTraceID))
+		}
+		loggerWithTrace := logger.With(withFields...)
 		c.Set("logger", loggerWithTrace)
-
-		// Add trace-id to response header
-		c.Header(TraceIDHeader, traceID)
 
 		// Process request
 		c.Next()
@@ -101,10 +113,20 @@ func LoggingMiddleware(logger *zap.Logger) gin.HandlerFunc {
 		duration := time.Since(start)
 		statusCode := c.Writer.Status()
 
+		// Routine successful probes are traffic about the platform, not the
+		// domain. TracingMiddleware already excludes them from spans and RED
+		// metrics through the same shouldTrace list; excluding them here is what
+		// makes that contract true for logs too. A FAILING probe is kept.
+		if !shouldTrace(path) && statusCode < 400 {
+			return
+		}
+
 		// One structured log per request; level chosen by status class so a
 		// single line carries the request outcome (no duplicate Info+Error).
+		// loggerWithTrace, not logger: the base logger carries no trace context,
+		// which left the access log uncorrelated (telemetry audit F-1). trace_id
+		// is already bound on it when a span exists.
 		fields := []zap.Field{
-			zap.String("trace_id", traceID),
 			zap.String("method", method),
 			zap.String("path", path),
 			zap.Int("status", statusCode),
@@ -112,7 +134,7 @@ func LoggingMiddleware(logger *zap.Logger) gin.HandlerFunc {
 			zap.String("client_ip", c.ClientIP()),
 			zap.String("user_agent", c.Request.UserAgent()),
 		}
-		logByStatus(logger, statusCode, fields)
+		logByStatus(loggerWithTrace, statusCode, fields)
 	}
 }
 
