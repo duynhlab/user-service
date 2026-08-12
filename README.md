@@ -24,9 +24,10 @@ minimal public view of them.
 
 - **Canonical contract:** [`homelab/docs/api/user.md`](https://github.com/duynhlab/homelab/blob/main/docs/api/user.md)
 - **Shared conventions:** [`homelab/docs/api/api.md`](https://github.com/duynhlab/homelab/blob/main/docs/api/api.md)
-- **Surfaces:** a public read of one profile, a JWT-protected read and update of
-  *your own* profile, and a cluster-only internal create. HTTP `:8080` also
-  carries `/health` and `/ready`.
+- **Surfaces:** a public read of one profile plus a JWT-protected read and update
+  of *your own* profile. There is no create route — profiles arrive just-in-time
+  from the verified token (see Gotchas). HTTP `:8080` also carries `/health` and
+  `/ready`.
 
 Routes, payloads and error codes live in the contract, so there is one place to
 change when they change.

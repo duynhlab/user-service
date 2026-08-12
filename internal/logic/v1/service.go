@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/duynhlab/user-service/internal/core/domain"
@@ -41,8 +40,6 @@ func (s *UserService) GetUser(ctx context.Context, id string) (*domain.User, err
 		if errors.Is(err, domain.ErrUserNotFound) {
 			recordProfileLookup(ctx, audiencePublic, false)
 		}
-		// If it's a "not found" error, we might want to wrap it differently
-		// For now, adhering to original logic which mock-failed on "999"
 		return nil, fmt.Errorf("get user by id %q: %w", id, err)
 	}
 
@@ -51,8 +48,9 @@ func (s *UserService) GetUser(ctx context.Context, id string) (*domain.User, err
 	return user, nil
 }
 
-// GetProfile retrieves the current user's profile
-// userID, username, email are passed from auth middleware (auth service token introspection)
+// GetProfile retrieves the current user's profile.
+// userID is the verified OIDC token subject (opaque string); username and
+// email are the verified token claims — all set by the auth middleware.
 func (s *UserService) GetProfile(ctx context.Context, userID string, username, email string) (*domain.User, error) {
 	ctx, span := middleware.StartSpan(ctx, "user.profile", trace.WithAttributes(
 		attribute.String("layer", "logic"),
@@ -60,21 +58,22 @@ func (s *UserService) GetProfile(ctx context.Context, userID string, username, e
 	))
 	defer span.End()
 
-	// Parse user_id
-	uid, err := strconv.Atoi(userID)
-	if err != nil {
+	// An empty subject cannot be attributed to a principal; authmw rejects
+	// such tokens, so this is defence-in-depth.
+	if userID == "" {
 		span.SetAttributes(attribute.Bool("profile.found", false))
-		return nil, fmt.Errorf("invalid user_id %q: %w", userID, domain.ErrUserNotFound)
+		return nil, fmt.Errorf("empty user_id: %w", domain.ErrUserNotFound)
 	}
 
 	// Fetch profile from repository
-	profile, err := s.repo.GetProfileByUserID(ctx, uid)
+	profile, err := s.repo.GetProfileByUserID(ctx, userID)
 	if err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("query user profile: %w", err)
 	}
 
-	// If no profile found, return auth data (legacy/fallback behavior)
+	// JIT fallback: no profile row yet — build the identity from the verified
+	// token claims only. The first PUT upsert creates the row.
 	if profile == nil {
 		span.SetAttributes(attribute.Bool("profile.found", false))
 		recordProfileLookup(ctx, audiencePrivate, false)
@@ -118,71 +117,8 @@ func (s *UserService) GetProfile(ctx context.Context, userID string, username, e
 	return user, nil
 }
 
-// CreateUser creates a new user profile
-func (s *UserService) CreateUser(ctx context.Context, req domain.CreateUserRequest) (*domain.User, error) {
-	ctx, span := middleware.StartSpan(ctx, "user.create", trace.WithAttributes(
-		attribute.String("layer", "logic"),
-	))
-	defer span.End()
-
-	// Validate email format
-	if !strings.Contains(req.Email, "@") {
-		span.SetAttributes(attribute.Bool("user.created", false))
-		return nil, fmt.Errorf("validate email %q for user %q: %w", req.Email, req.Username, domain.ErrInvalidEmail)
-	}
-
-	// Require an authoritative user_id from the caller; never synthesize one.
-	if req.UserID <= 0 {
-		span.SetAttributes(attribute.Bool("user.created", false))
-		return nil, fmt.Errorf("create user %q: %w", req.Username, domain.ErrInvalidUserID)
-	}
-	userID := req.UserID
-
-	// Check if profile exists
-	exists, err := s.repo.CheckProfileExists(ctx, userID)
-	if err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("check existing profile: %w", err)
-	}
-	if exists {
-		span.SetAttributes(attribute.Bool("user.created", false))
-		return nil, fmt.Errorf("create user %q: %w", req.Username, domain.ErrUserExists)
-	}
-
-	// Parse name
-	nameParts := strings.Fields(req.Name)
-	var firstName, lastName string
-	if len(nameParts) > 0 {
-		firstName = nameParts[0]
-	}
-	if len(nameParts) > 1 {
-		lastName = strings.Join(nameParts[1:], " ")
-	}
-
-	// Create profile
-	_, err = s.repo.CreateUserProfile(ctx, userID, firstName, lastName)
-	if err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("insert user profile: %w", err)
-	}
-
-	user := &domain.User{
-		ID:       strconv.Itoa(userID),
-		Username: req.Username,
-		Email:    req.Email,
-		Name:     req.Name,
-	}
-
-	span.SetAttributes(
-		attribute.String("user.id", user.ID),
-		attribute.Bool("user.created", true),
-	)
-	span.AddEvent("user.created")
-
-	return user, nil
-}
-
-// UpdateProfile updates the current user's profile
+// UpdateProfile upserts the current user's profile. userID is the verified
+// OIDC token subject; the upsert is the JIT provisioning write path.
 func (s *UserService) UpdateProfile(ctx context.Context, userID string, req domain.UpdateProfileRequest) (*domain.User, error) {
 	ctx, span := middleware.StartSpan(ctx, "user.update_profile", trace.WithAttributes(
 		attribute.String("layer", "logic"),
@@ -190,12 +126,12 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID string, req doma
 	))
 	defer span.End()
 
-	// Parse user ID
-	uid, err := strconv.Atoi(userID)
-	if err != nil {
+	// An empty subject cannot be attributed to a principal; authmw rejects
+	// such tokens, so this is defence-in-depth.
+	if userID == "" {
 		span.SetAttributes(attribute.Bool("profile.updated", false))
 		recordProfileUpdated(ctx, resultUnauthorized)
-		return nil, fmt.Errorf("invalid user_id %q: %w", userID, domain.ErrUnauthorized)
+		return nil, fmt.Errorf("empty user_id: %w", domain.ErrUnauthorized)
 	}
 
 	// Parse name
@@ -209,14 +145,14 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID string, req doma
 	}
 
 	// Upsert profile
-	err = s.repo.UpsertUserProfile(ctx, uid, firstName, lastName, req.Phone)
+	err := s.repo.UpsertUserProfile(ctx, userID, firstName, lastName, req.Phone)
 	if err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("upsert profile: %w", err)
 	}
 
 	user := &domain.User{
-		ID:   strconv.Itoa(uid),
+		ID:   userID,
 		Name: req.Name,
 	}
 

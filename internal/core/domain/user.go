@@ -10,18 +10,11 @@ type User struct {
 
 type UserProfile struct {
 	ID        int
-	UserID    int
+	UserID    string
 	FirstName *string
 	LastName  *string
 	Phone     *string
 	Address   *string
-}
-
-type CreateUserRequest struct {
-	UserID   int    `json:"user_id" binding:"required"`
-	Username string `json:"username" binding:"required"`
-	Email    string `json:"email" binding:"required,email"`
-	Name     string `json:"name" binding:"required"`
 }
 
 type UpdateProfileRequest struct {

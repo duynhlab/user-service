@@ -95,9 +95,13 @@ Rules an implementer can violate at the keyboard.
 - **The public view is a deliberate minimal projection** — id and name only. It
   omits email and everything else sensitive. Adding a field to it is a contract
   change, not a convenience.
-- **The internal create requires a caller-supplied user id and never mints one.**
-  Identity ids belong to auth-service; synthesising one here would create a
-  profile no account can claim.
+- **Profiles are provisioned just-in-time, never by a create route.** The
+  private read falls back to the verified token's claims when no row exists, and
+  the update upserts — together that *is* the provisioning path (ADR-041). The
+  old cluster-only create route is gone; do not reintroduce one, and never mint
+  an identity here: ids belong to the Keycloak realm.
+- **`user_id` is the OIDC token subject** — an opaque string, never an integer
+  (ADR-042). Code that parses it is a bug.
 - **Partial update means empty preserves and non-empty replaces**, expressed as
   `COALESCE(NULLIF(…))` in a single statement. Switching to an unconditional
   `SET` would blank a name on a phone-only update.
@@ -151,8 +155,10 @@ Rules an implementer can violate at the keyboard.
   `args: ["migrate"]`.
 - Metrics leave over OTLP. There is no `/metrics` endpoint and nothing scrapes
   this service.
-- The JWKS default is the `/auth/v1/public/auth/jwks` path. The shorter
-  `/auth/v1/public/jwks` is a deprecated alias; do not copy it into config or
+- The issuer owns the JWKS location: `OIDC_ISSUER` (the Keycloak realm) derives
+  `<issuer>/protocol/openid-connect/certs`; `OIDC_JWKS_URL` overrides it only
+  where the browser-facing issuer is unreachable in-cluster. The retired
+  `/auth/v1/public/auth/jwks` paths are gone — do not copy either into config or
   docs.
 
 ## API change synchronization

@@ -46,9 +46,9 @@ type Config struct {
 	// This gives Kubernetes/Service routing time to stop sending new traffic.
 	// From READINESS_DRAIN_DELAY env (default: 5s, max: 30s).
 	ReadinessDrainDelay int
-	JWKSURL             string // JWKS endpoint for local RS256 JWT verification - from AUTH_JWKS_URL env
-	JWTIssuer           string // Expected JWT issuer claim - from JWT_ISSUER env
-	JWTAudience         string // Expected JWT audience claim - from JWT_AUDIENCE env
+	OIDCIssuer          string // Expected OIDC issuer (Keycloak realm) - from OIDC_ISSUER env
+	OIDCAudience        string // Expected OIDC audience - from OIDC_AUDIENCE env
+	OIDCJWKSURL         string // Optional JWKS endpoint override - from OIDC_JWKS_URL env (empty: authmw derives it from the issuer)
 }
 
 // ServiceConfig defines basic service configuration
@@ -151,9 +151,9 @@ func Load() *Config {
 		},
 		ShutdownTimeout:     getEnvDurationSeconds("SHUTDOWN_TIMEOUT", 10),
 		ReadinessDrainDelay: getEnvDurationSecondsWithMax("READINESS_DRAIN_DELAY", 5, 30),
-		JWKSURL:             getEnv("AUTH_JWKS_URL", "http://auth.auth.svc.cluster.local:8080/auth/v1/public/auth/jwks"),
-		JWTIssuer:           getEnv("JWT_ISSUER", "https://gateway.duynh.me"),
-		JWTAudience:         getEnv("JWT_AUDIENCE", "duynhlab-platform"),
+		OIDCIssuer:          getEnv("OIDC_ISSUER", "https://id.duynh.me/realms/duynhlab"),
+		OIDCAudience:        getEnv("OIDC_AUDIENCE", "duynhlab-platform"),
+		OIDCJWKSURL:         getEnv("OIDC_JWKS_URL", ""),
 	}
 }
 

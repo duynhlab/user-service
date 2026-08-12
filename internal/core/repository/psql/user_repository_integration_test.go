@@ -118,57 +118,61 @@ func deref(s *string) string {
 	return *s
 }
 
+// Fixed realm subjects of the Keycloak demo users (ADR-041) — the seed keys
+// user_profiles.user_id by these opaque OIDC subject strings.
+const (
+	aliceSub   = "a11ce000-0000-4000-8000-000000000001"
+	missingSub = "00000000-0000-4000-8000-000000000999"
+)
+
 func TestUserRepository_Integration(t *testing.T) {
 	pool := newTestDB(t)
 	repo := NewUserRepository(pool)
 	ctx := context.Background()
 
 	t.Run("GetProfileByUserID returns seeded profile", func(t *testing.T) {
-		p, err := repo.GetProfileByUserID(ctx, 1) // Alice Johnson (seed)
+		p, err := repo.GetProfileByUserID(ctx, aliceSub) // Alice Johnson (seed)
 		if err != nil {
-			t.Fatalf("GetProfileByUserID(1): %v", err)
+			t.Fatalf("GetProfileByUserID(alice): %v", err)
 		}
 		if deref(p.FirstName) != "Alice" || deref(p.LastName) != "Johnson" {
 			t.Errorf("profile = %s %s, want Alice Johnson", deref(p.FirstName), deref(p.LastName))
 		}
+		if p.UserID != aliceSub {
+			t.Errorf("UserID = %q, want %q", p.UserID, aliceSub)
+		}
 	})
 
 	t.Run("GetProfileByUserID missing -> (nil, nil), service layer maps to not-found", func(t *testing.T) {
-		p, err := repo.GetProfileByUserID(ctx, 999999)
+		p, err := repo.GetProfileByUserID(ctx, missingSub)
 		if err != nil || p != nil {
 			t.Errorf("GetProfileByUserID(missing) = (%v, %v), want (nil, nil)", p, err)
 		}
 	})
 
-	t.Run("GetUser by id string", func(t *testing.T) {
-		if _, err := repo.GetUser(ctx, "1"); err != nil {
-			t.Errorf("GetUser(1): %v", err)
+	t.Run("GetUser by subject string", func(t *testing.T) {
+		if _, err := repo.GetUser(ctx, aliceSub); err != nil {
+			t.Errorf("GetUser(alice): %v", err)
 		}
-		if _, err := repo.GetUser(ctx, "999999"); !errors.Is(err, domain.ErrUserNotFound) {
+		if _, err := repo.GetUser(ctx, missingSub); !errors.Is(err, domain.ErrUserNotFound) {
 			t.Errorf("GetUser(missing) err = %v, want ErrUserNotFound", err)
 		}
-		if _, err := repo.GetUser(ctx, "not-a-number"); !errors.Is(err, domain.ErrUserNotFound) {
-			t.Errorf("GetUser(non-numeric) err = %v, want ErrUserNotFound", err)
+		if _, err := repo.GetUser(ctx, ""); !errors.Is(err, domain.ErrUserNotFound) {
+			t.Errorf("GetUser(empty subject) err = %v, want ErrUserNotFound", err)
 		}
 	})
 
-	t.Run("CheckProfileExists", func(t *testing.T) {
-		if ok, err := repo.CheckProfileExists(ctx, 1); err != nil || !ok {
-			t.Errorf("CheckProfileExists(1) = (%v,%v), want (true,nil)", ok, err)
-		}
-		if ok, err := repo.CheckProfileExists(ctx, 999999); err != nil || ok {
-			t.Errorf("CheckProfileExists(missing) = (%v,%v), want (false,nil)", ok, err)
+	t.Run("Update missing row reports not found", func(t *testing.T) {
+		updated, err := repo.UpdateUserProfile(ctx, missingSub, "New", "Name", "+1-555-9999")
+		if err != nil || updated {
+			t.Errorf("UpdateUserProfile(missing) = (%v,%v), want (false,nil)", updated, err)
 		}
 	})
 
-	t.Run("Create then Get then Update", func(t *testing.T) {
-		const uid = 100
-		id, err := repo.CreateUserProfile(ctx, uid, "Test", "User")
-		if err != nil {
-			t.Fatalf("CreateUserProfile: %v", err)
-		}
-		if id <= 0 {
-			t.Errorf("CreateUserProfile id = %d, want > 0", id)
+	t.Run("Upsert (JIT) creates then Get then Update", func(t *testing.T) {
+		const uid = "11111111-1111-4111-8111-000000000100"
+		if err := repo.UpsertUserProfile(ctx, uid, "Test", "User", ""); err != nil {
+			t.Fatalf("UpsertUserProfile (insert): %v", err)
 		}
 		updated, err := repo.UpdateUserProfile(ctx, uid, "New", "Name", "+1-555-9999")
 		if err != nil || !updated {
@@ -176,7 +180,7 @@ func TestUserRepository_Integration(t *testing.T) {
 		}
 		p, err := repo.GetProfileByUserID(ctx, uid)
 		if err != nil {
-			t.Fatalf("GetProfileByUserID(%d): %v", uid, err)
+			t.Fatalf("GetProfileByUserID(%s): %v", uid, err)
 		}
 		if deref(p.FirstName) != "New" || deref(p.LastName) != "Name" || deref(p.Phone) != "+1-555-9999" {
 			t.Errorf("after update = %+v, want New Name / +1-555-9999", p)
@@ -184,7 +188,7 @@ func TestUserRepository_Integration(t *testing.T) {
 	})
 
 	t.Run("UpsertUserProfile creates then updates", func(t *testing.T) {
-		const uid = 101
+		const uid = "11111111-1111-4111-8111-000000000101"
 		if err := repo.UpsertUserProfile(ctx, uid, "Up", "Sert", "+1-555-0000"); err != nil {
 			t.Fatalf("UpsertUserProfile (insert): %v", err)
 		}
@@ -193,7 +197,7 @@ func TestUserRepository_Integration(t *testing.T) {
 		}
 		p, err := repo.GetProfileByUserID(ctx, uid)
 		if err != nil {
-			t.Fatalf("GetProfileByUserID(%d): %v", uid, err)
+			t.Fatalf("GetProfileByUserID(%s): %v", uid, err)
 		}
 		if deref(p.FirstName) != "Up2" {
 			t.Errorf("after upsert-update FirstName = %q, want Up2", deref(p.FirstName))
