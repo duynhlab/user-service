@@ -3,7 +3,7 @@ module github.com/duynhlab/user-service
 go 1.26.2
 
 require (
-	github.com/duynhlab/pkg/authmw v0.37.0
+	github.com/duynhlab/pkg/authmw v0.37.1
 	github.com/duynhlab/pkg/dbx v0.36.1
 	github.com/duynhlab/pkg/httpx v0.36.1
 	github.com/duynhlab/pkg/logger/zapx v0.36.0
