@@ -110,10 +110,16 @@ func main() {
 	userService := logicv1.NewUserService(userRepo)
 	userHandler := webv1.NewUserHandler(userService)
 
-	// Local RS256 JWT verification (cached JWKS) is the only credential — no
-	// gRPC fallback. NewVerifier refreshes in the background and does not
-	// block on an unreachable JWKS, so it is safe to build at startup.
-	verifier, err := authmw.NewVerifier(cfg.JWKSURL, cfg.JWTIssuer, cfg.JWTAudience)
+	// Local OIDC JWT verification (cached Keycloak JWKS) is the only
+	// credential — no gRPC fallback. NewVerifier refreshes in the background
+	// and does not block on an unreachable JWKS, so it is safe to build at
+	// startup. JWKSURL is optional: empty derives the Keycloak realm certs
+	// endpoint from the issuer.
+	verifier, err := authmw.NewVerifier(authmw.Config{
+		Issuer:   cfg.OIDCIssuer,
+		Audience: cfg.OIDCAudience,
+		JWKSURL:  cfg.OIDCJWKSURL,
+	})
 	if err != nil {
 		logger.Fatal("Failed to initialize JWT verifier", zap.Error(err))
 	}
@@ -235,9 +241,6 @@ func setupServer(cfg *config.Config, logger *zap.Logger, verifier *authmw.Verifi
 		privateUsers.GET("/profile", userHandler.GetProfile)
 		privateUsers.PUT("/profile", userHandler.UpdateProfile)
 	}
-
-	// Internal: called by auth-service during registration. Not routed through Kong.
-	r.POST("/user/v1/internal/users", userHandler.CreateUser)
 
 	return &http.Server{
 		Addr:              ":" + cfg.Service.Port,

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/duynhlab/user-service/internal/core/domain"
@@ -24,9 +23,9 @@ func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 
 // GetUser retrieves the public view of a user by ID.
 //
-// user-service owns only the user_profiles table; the authoritative users
-// table (with username/email) lives in auth-service across a cluster boundary
-// with no FK. We therefore resolve the public Name from user_profiles and
+// The id is the OIDC token subject — an opaque string (ADR-041). user-service
+// owns only the user_profiles table; the authoritative identity lives in the
+// Keycloak realm. We therefore resolve the public Name from user_profiles and
 // leave Username/Email empty — the public endpoint omits them anyway. A
 // missing profile row maps to domain.ErrUserNotFound.
 func (r *UserRepository) GetUser(ctx context.Context, id string) (*domain.User, error) {
@@ -34,12 +33,11 @@ func (r *UserRepository) GetUser(ctx context.Context, id string) (*domain.User, 
 		return nil, errors.New("database connection not available")
 	}
 
-	userID, err := strconv.Atoi(id)
-	if err != nil {
-		return nil, fmt.Errorf("parse user id %q: %w", id, domain.ErrUserNotFound)
+	if id == "" {
+		return nil, fmt.Errorf("empty user id: %w", domain.ErrUserNotFound)
 	}
 
-	profile, err := r.GetProfileByUserID(ctx, userID)
+	profile, err := r.GetProfileByUserID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("get user %q: %w", id, err)
 	}
@@ -70,8 +68,8 @@ func profileName(profile *domain.UserProfile) string {
 	return strings.Join(parts, " ")
 }
 
-// GetProfileByUserID retrieves a user profile by user ID
-func (r *UserRepository) GetProfileByUserID(ctx context.Context, userID int) (*domain.UserProfile, error) {
+// GetProfileByUserID retrieves a user profile by user ID (OIDC subject string)
+func (r *UserRepository) GetProfileByUserID(ctx context.Context, userID string) (*domain.UserProfile, error) {
 	db := r.pool
 	if db == nil {
 		return nil, errors.New("database connection not available")
@@ -98,25 +96,9 @@ func (r *UserRepository) GetProfileByUserID(ctx context.Context, userID int) (*d
 	return &profile, nil
 }
 
-// CreateUserProfile creates a new user profile
-func (r *UserRepository) CreateUserProfile(ctx context.Context, userID int, firstName, lastName string) (int, error) {
-	db := r.pool
-	if db == nil {
-		return 0, errors.New("database connection not available")
-	}
-
-	query := `INSERT INTO user_profiles (user_id, first_name, last_name) VALUES ($1, $2, $3) RETURNING id`
-	var profileID int
-	err := db.QueryRow(ctx, query, userID, firstName, lastName).Scan(&profileID)
-	if err != nil {
-		return 0, fmt.Errorf("insert user profile: %w", err)
-	}
-	return profileID, nil
-}
-
 // UpdateUserProfile updates an existing user profile
 // Returns true if updated, false if not found
-func (r *UserRepository) UpdateUserProfile(ctx context.Context, userID int, firstName, lastName, phone string) (bool, error) {
+func (r *UserRepository) UpdateUserProfile(ctx context.Context, userID string, firstName, lastName, phone string) (bool, error) {
 	db := r.pool
 	if db == nil {
 		return false, errors.New("database connection not available")
@@ -131,27 +113,9 @@ func (r *UserRepository) UpdateUserProfile(ctx context.Context, userID int, firs
 	return result.RowsAffected() > 0, nil
 }
 
-// CheckProfileExists checks if a profile exists for a user ID
-func (r *UserRepository) CheckProfileExists(ctx context.Context, userID int) (bool, error) {
-	db := r.pool
-	if db == nil {
-		return false, errors.New("database connection not available")
-	}
-
-	var id int
-	query := `SELECT id FROM user_profiles WHERE user_id = $1`
-	err := db.QueryRow(ctx, query, userID).Scan(&id)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return false, nil
-		}
-		return false, fmt.Errorf("check profile exists: %w", err)
-	}
-	return true, nil
-}
-
-// UpsertUserProfile creates or updates a user profile
-func (r *UserRepository) UpsertUserProfile(ctx context.Context, userID int, firstName, lastName, phone string) error {
+// UpsertUserProfile creates or updates a user profile. This is the JIT
+// provisioning write path: the first PUT from a verified token creates the row.
+func (r *UserRepository) UpsertUserProfile(ctx context.Context, userID string, firstName, lastName, phone string) error {
 	// Try update first
 	updated, err := r.UpdateUserProfile(ctx, userID, firstName, lastName, phone)
 	if err != nil {

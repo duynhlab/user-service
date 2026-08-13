@@ -8,19 +8,7 @@ var (
 	// HTTP Status: 404 Not Found
 	ErrUserNotFound = errors.New("user not found")
 
-	// ErrUserExists indicates a user with the same username or email already exists.
-	// HTTP Status: 409 Conflict
-	ErrUserExists = errors.New("user already exists")
-
-	// ErrInvalidEmail indicates the provided email address is invalid.
-	// HTTP Status: 400 Bad Request
-	ErrInvalidEmail = errors.New("invalid email address")
-
 	// ErrUnauthorized indicates the user is not authorized to perform the operation.
 	// HTTP Status: 403 Forbidden
 	ErrUnauthorized = errors.New("unauthorized access")
-
-	// ErrInvalidUserID indicates a required user ID was missing or invalid.
-	// HTTP Status: 400 Bad Request
-	ErrInvalidUserID = errors.New("invalid user id")
 )
