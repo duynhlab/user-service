@@ -16,34 +16,30 @@ import (
 
 func init() { gin.SetMode(gin.TestMode) }
 
+// aliceSub is the fixed realm subject of the alice demo user — user ids are
+// opaque OIDC subject strings (ADR-041).
+const aliceSub = "a11ce000-0000-4000-8000-000000000001"
+
 // mockUserRepo is a configurable domain.UserRepository double for web tests.
 // Each field holds the function invoked by the matching interface method, so a
 // test wires up only the behavior it needs.
 type mockUserRepo struct {
 	getUserFn            func(ctx context.Context, id string) (*domain.User, error)
-	getProfileByUserIDFn func(ctx context.Context, userID int) (*domain.UserProfile, error)
-	createUserProfileFn  func(ctx context.Context, userID int, firstName, lastName string) (int, error)
-	updateUserProfileFn  func(ctx context.Context, userID int, firstName, lastName, phone string) (bool, error)
-	checkProfileExistsFn func(ctx context.Context, userID int) (bool, error)
-	upsertUserProfileFn  func(ctx context.Context, userID int, firstName, lastName, phone string) error
+	getProfileByUserIDFn func(ctx context.Context, userID string) (*domain.UserProfile, error)
+	updateUserProfileFn  func(ctx context.Context, userID string, firstName, lastName, phone string) (bool, error)
+	upsertUserProfileFn  func(ctx context.Context, userID string, firstName, lastName, phone string) error
 }
 
 func (m *mockUserRepo) GetUser(ctx context.Context, id string) (*domain.User, error) {
 	return m.getUserFn(ctx, id)
 }
-func (m *mockUserRepo) GetProfileByUserID(ctx context.Context, userID int) (*domain.UserProfile, error) {
+func (m *mockUserRepo) GetProfileByUserID(ctx context.Context, userID string) (*domain.UserProfile, error) {
 	return m.getProfileByUserIDFn(ctx, userID)
 }
-func (m *mockUserRepo) CreateUserProfile(ctx context.Context, userID int, firstName, lastName string) (int, error) {
-	return m.createUserProfileFn(ctx, userID, firstName, lastName)
-}
-func (m *mockUserRepo) UpdateUserProfile(ctx context.Context, userID int, firstName, lastName, phone string) (bool, error) {
+func (m *mockUserRepo) UpdateUserProfile(ctx context.Context, userID string, firstName, lastName, phone string) (bool, error) {
 	return m.updateUserProfileFn(ctx, userID, firstName, lastName, phone)
 }
-func (m *mockUserRepo) CheckProfileExists(ctx context.Context, userID int) (bool, error) {
-	return m.checkProfileExistsFn(ctx, userID)
-}
-func (m *mockUserRepo) UpsertUserProfile(ctx context.Context, userID int, firstName, lastName, phone string) error {
+func (m *mockUserRepo) UpsertUserProfile(ctx context.Context, userID string, firstName, lastName, phone string) error {
 	return m.upsertUserProfileFn(ctx, userID, firstName, lastName, phone)
 }
 
@@ -94,15 +90,15 @@ func TestGetUser_Success(t *testing.T) {
 			return &domain.User{ID: id, Name: "Alice", Email: "a@b.com"}, nil
 		},
 	}
-	c, rec := newCtx(http.MethodGet, "/user/v1/public/users/1", nil, gin.Params{{Key: "id", Value: "1"}})
+	c, rec := newCtx(http.MethodGet, "/user/v1/public/users/"+aliceSub, nil, gin.Params{{Key: "id", Value: aliceSub}})
 	newHandler(repo).GetUser(c)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 	body := decode(t, rec)
-	if body["name"] != "Alice" || body["id"] != "1" {
-		t.Errorf("body = %v, want id=1 name=Alice", body)
+	if body["name"] != "Alice" || body["id"] != aliceSub {
+		t.Errorf("body = %v, want id=%s name=Alice", body, aliceSub)
 	}
 	// PublicUser must not leak email.
 	if _, ok := body["email"]; ok {
@@ -116,7 +112,7 @@ func TestGetUser_NotFound(t *testing.T) {
 			return nil, domain.ErrUserNotFound
 		},
 	}
-	c, rec := newCtx(http.MethodGet, "/user/v1/public/users/9", nil, gin.Params{{Key: "id", Value: "9"}})
+	c, rec := newCtx(http.MethodGet, "/user/v1/public/users/unknown-sub", nil, gin.Params{{Key: "id", Value: "unknown-sub"}})
 	newHandler(repo).GetUser(c)
 
 	if rec.Code != http.StatusNotFound {
@@ -133,7 +129,7 @@ func TestGetUser_InternalError(t *testing.T) {
 			return nil, errors.New("db down")
 		},
 	}
-	c, rec := newCtx(http.MethodGet, "/user/v1/public/users/1", nil, gin.Params{{Key: "id", Value: "1"}})
+	c, rec := newCtx(http.MethodGet, "/user/v1/public/users/"+aliceSub, nil, gin.Params{{Key: "id", Value: aliceSub}})
 	newHandler(repo).GetUser(c)
 
 	if rec.Code != http.StatusInternalServerError {
@@ -148,13 +144,13 @@ func TestGetUser_InternalError(t *testing.T) {
 
 func TestGetProfile_Success(t *testing.T) {
 	repo := &mockUserRepo{
-		getProfileByUserIDFn: func(_ context.Context, _ int) (*domain.UserProfile, error) {
+		getProfileByUserIDFn: func(_ context.Context, _ string) (*domain.UserProfile, error) {
 			fn, ln, ph := "Jane", "Doe", "555"
 			return &domain.UserProfile{FirstName: &fn, LastName: &ln, Phone: &ph}, nil
 		},
 	}
 	c, rec := newCtx(http.MethodGet, "/user/v1/private/users/profile",
-		map[string]string{"user_id": "1", "username": "jane", "email": "j@d.com"}, nil)
+		map[string]string{"user_id": aliceSub, "username": "jane", "email": "j@d.com"}, nil)
 	newHandler(repo).GetProfile(c)
 
 	if rec.Code != http.StatusOK {
@@ -163,6 +159,27 @@ func TestGetProfile_Success(t *testing.T) {
 	body := decode(t, rec)
 	if body["name"] != "Jane Doe" {
 		t.Errorf("name = %v, want Jane Doe", body["name"])
+	}
+}
+
+// JIT provisioning read: no profile row yet — the handler still returns 200
+// with an identity built from the verified token claims only.
+func TestGetProfile_JITFallback(t *testing.T) {
+	repo := &mockUserRepo{
+		getProfileByUserIDFn: func(_ context.Context, _ string) (*domain.UserProfile, error) {
+			return nil, nil
+		},
+	}
+	c, rec := newCtx(http.MethodGet, "/user/v1/private/users/profile",
+		map[string]string{"user_id": aliceSub, "username": "alice", "email": "alice@example.com"}, nil)
+	newHandler(repo).GetProfile(c)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := decode(t, rec)
+	if body["id"] != aliceSub || body["username"] != "alice" || body["email"] != "alice@example.com" {
+		t.Errorf("body = %v, want claims identity id=%s username=alice email=alice@example.com", body, aliceSub)
 	}
 }
 
@@ -178,75 +195,15 @@ func TestGetProfile_Unauthorized(t *testing.T) {
 	}
 }
 
-// Non-numeric user_id makes the logic layer return ErrUserNotFound, which the
-// handler's default branch maps to 500.
 func TestGetProfile_InternalError(t *testing.T) {
+	repo := &mockUserRepo{
+		getProfileByUserIDFn: func(_ context.Context, _ string) (*domain.UserProfile, error) {
+			return nil, errors.New("db down")
+		},
+	}
 	c, rec := newCtx(http.MethodGet, "/user/v1/private/users/profile",
-		map[string]string{"user_id": "not-a-number"}, nil)
-	newHandler(&mockUserRepo{}).GetProfile(c)
-
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500", rec.Code)
-	}
-	if code := decode(t, rec)["code"]; code != "INTERNAL_ERROR" {
-		t.Errorf("code = %v, want INTERNAL_ERROR", code)
-	}
-}
-
-// --- CreateUser ---
-
-func TestCreateUser_Success(t *testing.T) {
-	repo := &mockUserRepo{
-		checkProfileExistsFn: func(_ context.Context, _ int) (bool, error) { return false, nil },
-		createUserProfileFn:  func(_ context.Context, _ int, _, _ string) (int, error) { return 1, nil },
-	}
-	body := `{"user_id":1,"username":"alice","email":"a@b.com","name":"Alice Smith"}`
-	c, rec := ctxWithBody(http.MethodPost, "/user/v1/internal/users", body, nil)
-	newHandler(repo).CreateUser(c)
-
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201", rec.Code)
-	}
-	if decode(t, rec)["username"] != "alice" {
-		t.Errorf("username = %v, want alice", decode(t, rec)["username"])
-	}
-}
-
-func TestCreateUser_BadJSON(t *testing.T) {
-	c, rec := ctxWithBody(http.MethodPost, "/user/v1/internal/users", "{", nil)
-	newHandler(&mockUserRepo{}).CreateUser(c)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
-	}
-	if code := decode(t, rec)["code"]; code != "VALIDATION_ERROR" {
-		t.Errorf("code = %v, want VALIDATION_ERROR", code)
-	}
-}
-
-func TestCreateUser_Conflict(t *testing.T) {
-	repo := &mockUserRepo{
-		checkProfileExistsFn: func(_ context.Context, _ int) (bool, error) { return true, nil },
-	}
-	body := `{"user_id":1,"username":"alice","email":"a@b.com","name":"Alice"}`
-	c, rec := ctxWithBody(http.MethodPost, "/user/v1/internal/users", body, nil)
-	newHandler(repo).CreateUser(c)
-
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409", rec.Code)
-	}
-	if code := decode(t, rec)["code"]; code != "CONFLICT" {
-		t.Errorf("code = %v, want CONFLICT", code)
-	}
-}
-
-func TestCreateUser_InternalError(t *testing.T) {
-	repo := &mockUserRepo{
-		checkProfileExistsFn: func(_ context.Context, _ int) (bool, error) { return false, errors.New("db down") },
-	}
-	body := `{"user_id":1,"username":"alice","email":"a@b.com","name":"Alice"}`
-	c, rec := ctxWithBody(http.MethodPost, "/user/v1/internal/users", body, nil)
-	newHandler(repo).CreateUser(c)
+		map[string]string{"user_id": aliceSub}, nil)
+	newHandler(repo).GetProfile(c)
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
@@ -260,10 +217,10 @@ func TestCreateUser_InternalError(t *testing.T) {
 
 func TestUpdateProfile_Success(t *testing.T) {
 	repo := &mockUserRepo{
-		upsertUserProfileFn: func(_ context.Context, _ int, _, _, _ string) error { return nil },
+		upsertUserProfileFn: func(_ context.Context, _ string, _, _, _ string) error { return nil },
 	}
 	c, rec := ctxWithBody(http.MethodPut, "/user/v1/private/users/profile",
-		`{"name":"New Name","phone":"555"}`, map[string]string{"user_id": "1"})
+		`{"name":"New Name","phone":"555"}`, map[string]string{"user_id": aliceSub})
 	newHandler(repo).UpdateProfile(c)
 
 	if rec.Code != http.StatusOK {
@@ -288,7 +245,7 @@ func TestUpdateProfile_Unauthorized(t *testing.T) {
 
 func TestUpdateProfile_BadJSON(t *testing.T) {
 	c, rec := ctxWithBody(http.MethodPut, "/user/v1/private/users/profile", "{",
-		map[string]string{"user_id": "1"})
+		map[string]string{"user_id": aliceSub})
 	newHandler(&mockUserRepo{}).UpdateProfile(c)
 
 	if rec.Code != http.StatusBadRequest {
@@ -299,11 +256,16 @@ func TestUpdateProfile_BadJSON(t *testing.T) {
 	}
 }
 
-// Non-numeric user_id makes the logic layer return ErrUnauthorized → 403.
+// A logic-layer ErrUnauthorized (e.g. subject/ownership mismatch) maps to 403.
 func TestUpdateProfile_Forbidden(t *testing.T) {
+	repo := &mockUserRepo{
+		upsertUserProfileFn: func(_ context.Context, _ string, _, _, _ string) error {
+			return domain.ErrUnauthorized
+		},
+	}
 	c, rec := ctxWithBody(http.MethodPut, "/user/v1/private/users/profile", `{"name":"x"}`,
-		map[string]string{"user_id": "not-a-number"})
-	newHandler(&mockUserRepo{}).UpdateProfile(c)
+		map[string]string{"user_id": aliceSub})
+	newHandler(repo).UpdateProfile(c)
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rec.Code)
@@ -315,10 +277,10 @@ func TestUpdateProfile_Forbidden(t *testing.T) {
 
 func TestUpdateProfile_InternalError(t *testing.T) {
 	repo := &mockUserRepo{
-		upsertUserProfileFn: func(_ context.Context, _ int, _, _, _ string) error { return errors.New("db down") },
+		upsertUserProfileFn: func(_ context.Context, _ string, _, _, _ string) error { return errors.New("db down") },
 	}
 	c, rec := ctxWithBody(http.MethodPut, "/user/v1/private/users/profile", `{"name":"x"}`,
-		map[string]string{"user_id": "1"})
+		map[string]string{"user_id": aliceSub})
 	newHandler(repo).UpdateProfile(c)
 
 	if rec.Code != http.StatusInternalServerError {

@@ -4,7 +4,7 @@
 -- User profiles table
 CREATE TABLE IF NOT EXISTS user_profiles (
     id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL UNIQUE,  -- References auth.users.id (cross-cluster, no FK)
+    user_id VARCHAR(255) NOT NULL UNIQUE,  -- OIDC token subject (Keycloak sub, opaque string; ADR-041)
     first_name VARCHAR(100),
     last_name VARCHAR(100),
     phone VARCHAR(20),
@@ -15,4 +15,3 @@ CREATE TABLE IF NOT EXISTS user_profiles (
 
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_user_profiles_user ON user_profiles(user_id);
-

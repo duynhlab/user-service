@@ -101,43 +101,6 @@ func (h *UserHandler) GetProfile(c *gin.Context) {
 	c.JSON(http.StatusOK, user)
 }
 
-// CreateUser handles HTTP request to create a new user
-func (h *UserHandler) CreateUser(c *gin.Context) {
-	ctx, span, zapLogger := beginRequest(c)
-
-	var req domain.CreateUserRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		span.SetAttributes(attribute.Bool("request.valid", false))
-		span.RecordError(err)
-		zapLogger.Error("Invalid request", zap.Error(err))
-		httpx.RespondError(c, http.StatusBadRequest, httpx.CodeValidation, sanitizeValidationError(err))
-		return
-	}
-
-	span.SetAttributes(attribute.Bool("request.valid", true))
-
-	user, err := h.service.CreateUser(ctx, req)
-	if err != nil {
-		span.RecordError(err)
-		zapLogger.Error("Failed to create user", zap.Error(err))
-
-		switch {
-		case errors.Is(err, domain.ErrUserExists):
-			httpx.RespondError(c, http.StatusConflict, httpx.CodeConflict, "User already exists")
-		case errors.Is(err, domain.ErrInvalidEmail):
-			httpx.RespondError(c, http.StatusBadRequest, httpx.CodeValidation, "Invalid email address")
-		case errors.Is(err, domain.ErrInvalidUserID):
-			httpx.RespondError(c, http.StatusBadRequest, httpx.CodeValidation, "Invalid user id")
-		default:
-			httpx.RespondError(c, http.StatusInternalServerError, httpx.CodeInternal, "Internal server error")
-		}
-		return
-	}
-
-	zapLogger.Info("User created", zap.String("user_id", user.ID))
-	c.JSON(http.StatusCreated, user)
-}
-
 // UpdateProfile handles PUT /user/v1/private/users/profile
 func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	ctx, span, zapLogger := beginRequest(c)

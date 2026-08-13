@@ -10,6 +10,10 @@ import (
 
 var errRepo = errors.New("repo failure")
 
+// aliceSub is the fixed realm subject of the alice demo user (Keycloak realm
+// import) — user ids are opaque OIDC subject strings (ADR-041).
+const aliceSub = "a11ce000-0000-4000-8000-000000000001"
+
 func TestUserService_GetUser(t *testing.T) {
 	t.Parallel()
 
@@ -22,7 +26,7 @@ func TestUserService_GetUser(t *testing.T) {
 	}{
 		{
 			name: "success",
-			id:   "1",
+			id:   aliceSub,
 			getUserFn: func(_ context.Context, id string) (*domain.User, error) {
 				return &domain.User{ID: id, Name: "Alice Johnson"}, nil
 			},
@@ -30,7 +34,7 @@ func TestUserService_GetUser(t *testing.T) {
 		},
 		{
 			name: "not found",
-			id:   "999",
+			id:   "00000000-0000-4000-8000-000000000999",
 			getUserFn: func(_ context.Context, _ string) (*domain.User, error) {
 				return nil, domain.ErrUserNotFound
 			},
@@ -38,7 +42,7 @@ func TestUserService_GetUser(t *testing.T) {
 		},
 		{
 			name: "repo error",
-			id:   "1",
+			id:   aliceSub,
 			getUserFn: func(_ context.Context, _ string) (*domain.User, error) {
 				return nil, errRepo
 			},
@@ -80,17 +84,17 @@ func TestUserService_GetProfile(t *testing.T) {
 		userID     string
 		username   string
 		email      string
-		getProfile func(ctx context.Context, userID int) (*domain.UserProfile, error)
+		getProfile func(ctx context.Context, userID string) (*domain.UserProfile, error)
 		wantName   string
 		wantPhone  string
 		wantErrIs  error
 	}{
 		{
 			name:     "profile found with full name",
-			userID:   "1",
+			userID:   aliceSub,
 			username: "alice",
 			email:    "alice@example.com",
-			getProfile: func(_ context.Context, _ int) (*domain.UserProfile, error) {
+			getProfile: func(_ context.Context, _ string) (*domain.UserProfile, error) {
 				return &domain.UserProfile{
 					FirstName: strPtr("Alice"),
 					LastName:  strPtr("Johnson"),
@@ -102,27 +106,27 @@ func TestUserService_GetProfile(t *testing.T) {
 		},
 		{
 			name:     "profile found but empty names falls back to default",
-			userID:   "2",
+			userID:   "a11ce000-0000-4000-8000-000000000002",
 			username: "bob",
 			email:    "bob@example.com",
-			getProfile: func(_ context.Context, _ int) (*domain.UserProfile, error) {
+			getProfile: func(_ context.Context, _ string) (*domain.UserProfile, error) {
 				return &domain.UserProfile{}, nil
 			},
-			wantName: "User 2",
+			wantName: "User a11ce000-0000-4000-8000-000000000002",
 		},
 		{
-			name:     "no profile returns auth fallback",
-			userID:   "3",
+			name:     "no profile row returns JIT claims fallback",
+			userID:   "a11ce000-0000-4000-8000-000000000003",
 			username: "carol",
 			email:    "carol@example.com",
-			getProfile: func(_ context.Context, _ int) (*domain.UserProfile, error) {
+			getProfile: func(_ context.Context, _ string) (*domain.UserProfile, error) {
 				return nil, nil
 			},
-			wantName: "User 3",
+			wantName: "User a11ce000-0000-4000-8000-000000000003",
 		},
 		{
-			name:     "invalid user id",
-			userID:   "not-a-number",
+			name:     "empty subject rejected",
+			userID:   "",
 			username: "x",
 			email:    "x@example.com",
 			// repo not consulted; nil fn would panic if called.
@@ -130,10 +134,10 @@ func TestUserService_GetProfile(t *testing.T) {
 		},
 		{
 			name:     "repo error",
-			userID:   "4",
-			username: "dave",
-			email:    "dave@example.com",
-			getProfile: func(_ context.Context, _ int) (*domain.UserProfile, error) {
+			userID:   "a11ce000-0000-4000-8000-000000000004",
+			username: "david",
+			email:    "david@example.com",
+			getProfile: func(_ context.Context, _ string) (*domain.UserProfile, error) {
 				return nil, errRepo
 			},
 			wantErrIs: errRepo,
@@ -169,93 +173,29 @@ func TestUserService_GetProfile(t *testing.T) {
 	}
 }
 
-func TestUserService_CreateUser(t *testing.T) {
+// TestUserService_GetProfile_JITFallbackClaimsOnly pins the JIT provisioning
+// read: with no profile row the identity is built from the verified token
+// claims only (subject, username, email) — no synthesized or persisted data.
+func TestUserService_GetProfile_JITFallbackClaimsOnly(t *testing.T) {
 	t.Parallel()
+	svc := NewUserService(&mockRepo{
+		getProfileByUserIDFn: func(_ context.Context, _ string) (*domain.UserProfile, error) {
+			return nil, nil
+		},
+	})
 
-	tests := []struct {
-		name      string
-		req       domain.CreateUserRequest
-		checkFn   func(ctx context.Context, userID int) (bool, error)
-		createFn  func(ctx context.Context, userID int, firstName, lastName string) (int, error)
-		wantID    string
-		wantErrIs error
-	}{
-		{
-			name: "success with first and last name",
-			req:  domain.CreateUserRequest{UserID: 10, Username: "alice", Email: "alice@example.com", Name: "Alice Johnson"},
-			checkFn: func(_ context.Context, _ int) (bool, error) {
-				return false, nil
-			},
-			createFn: func(_ context.Context, _ int, firstName, lastName string) (int, error) {
-				if firstName != "Alice" || lastName != "Johnson" {
-					t.Errorf("CreateUserProfile got names %q/%q, want Alice/Johnson", firstName, lastName)
-				}
-				return 1, nil
-			},
-			wantID: "10",
-		},
-		{
-			name:      "invalid email",
-			req:       domain.CreateUserRequest{UserID: 10, Username: "alice", Email: "no-at-sign", Name: "Alice"},
-			wantErrIs: domain.ErrInvalidEmail,
-		},
-		{
-			name:      "invalid user id",
-			req:       domain.CreateUserRequest{UserID: 0, Username: "alice", Email: "alice@example.com", Name: "Alice"},
-			wantErrIs: domain.ErrInvalidUserID,
-		},
-		{
-			name: "profile already exists",
-			req:  domain.CreateUserRequest{UserID: 10, Username: "alice", Email: "alice@example.com", Name: "Alice"},
-			checkFn: func(_ context.Context, _ int) (bool, error) {
-				return true, nil
-			},
-			wantErrIs: domain.ErrUserExists,
-		},
-		{
-			name: "check exists error",
-			req:  domain.CreateUserRequest{UserID: 10, Username: "alice", Email: "alice@example.com", Name: "Alice"},
-			checkFn: func(_ context.Context, _ int) (bool, error) {
-				return false, errRepo
-			},
-			wantErrIs: errRepo,
-		},
-		{
-			name: "create profile error",
-			req:  domain.CreateUserRequest{UserID: 10, Username: "alice", Email: "alice@example.com", Name: "Alice"},
-			checkFn: func(_ context.Context, _ int) (bool, error) {
-				return false, nil
-			},
-			createFn: func(_ context.Context, _ int, _, _ string) (int, error) {
-				return 0, errRepo
-			},
-			wantErrIs: errRepo,
-		},
+	got, err := svc.GetProfile(context.Background(), aliceSub, "alice", "alice@example.com")
+	if err != nil {
+		t.Fatalf("GetProfile() unexpected error = %v", err)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			svc := NewUserService(&mockRepo{
-				checkProfileExistsFn: tt.checkFn,
-				createUserProfileFn:  tt.createFn,
-			})
-
-			got, err := svc.CreateUser(context.Background(), tt.req)
-
-			if tt.wantErrIs != nil {
-				if !errors.Is(err, tt.wantErrIs) {
-					t.Fatalf("CreateUser() error = %v, want %v", err, tt.wantErrIs)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("CreateUser() unexpected error = %v", err)
-			}
-			if got.ID != tt.wantID {
-				t.Errorf("CreateUser() ID = %q, want %q", got.ID, tt.wantID)
-			}
-		})
+	if got.ID != aliceSub {
+		t.Errorf("ID = %q, want token subject %q", got.ID, aliceSub)
+	}
+	if got.Username != "alice" || got.Email != "alice@example.com" {
+		t.Errorf("username/email = %q/%q, want claims alice/alice@example.com", got.Username, got.Email)
+	}
+	if got.Phone != "" {
+		t.Errorf("Phone = %q, want empty (no stored profile)", got.Phone)
 	}
 }
 
@@ -266,15 +206,18 @@ func TestUserService_UpdateProfile(t *testing.T) {
 		name      string
 		userID    string
 		req       domain.UpdateProfileRequest
-		upsertFn  func(ctx context.Context, userID int, firstName, lastName, phone string) error
+		upsertFn  func(ctx context.Context, userID string, firstName, lastName, phone string) error
 		wantName  string
 		wantErrIs error
 	}{
 		{
-			name:   "success",
-			userID: "1",
+			name:   "success upserts with subject string",
+			userID: aliceSub,
 			req:    domain.UpdateProfileRequest{Name: "Alice Johnson", Phone: "+1-555-0101"},
-			upsertFn: func(_ context.Context, _ int, firstName, lastName, phone string) error {
+			upsertFn: func(_ context.Context, userID string, firstName, lastName, phone string) error {
+				if userID != aliceSub {
+					t.Errorf("UpsertUserProfile got userID %q, want %q", userID, aliceSub)
+				}
 				if firstName != "Alice" || lastName != "Johnson" || phone != "+1-555-0101" {
 					t.Errorf("UpsertUserProfile got %q/%q/%q", firstName, lastName, phone)
 				}
@@ -283,16 +226,16 @@ func TestUserService_UpdateProfile(t *testing.T) {
 			wantName: "Alice Johnson",
 		},
 		{
-			name:      "invalid user id",
-			userID:    "abc",
+			name:      "empty subject rejected",
+			userID:    "",
 			req:       domain.UpdateProfileRequest{Name: "Alice"},
 			wantErrIs: domain.ErrUnauthorized,
 		},
 		{
 			name:   "upsert error",
-			userID: "1",
+			userID: aliceSub,
 			req:    domain.UpdateProfileRequest{Name: "Alice"},
-			upsertFn: func(_ context.Context, _ int, _, _, _ string) error {
+			upsertFn: func(_ context.Context, _ string, _, _, _ string) error {
 				return errRepo
 			},
 			wantErrIs: errRepo,

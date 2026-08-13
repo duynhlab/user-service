@@ -93,15 +93,15 @@ func TestProfileMetrics(t *testing.T) {
 	ctx := context.Background()
 
 	// --- profile_updated: success + unauthorized, and the not-counted DB error.
-	updOK := svcWith(&mockRepo{upsertUserProfileFn: func(_ context.Context, _ int, _, _, _ string) error { return nil }})
-	_, err := updOK.UpdateProfile(ctx, "1", domain.UpdateProfileRequest{Name: "Alice Johnson"})
+	updOK := svcWith(&mockRepo{upsertUserProfileFn: func(_ context.Context, _ string, _, _, _ string) error { return nil }})
+	_, err := updOK.UpdateProfile(ctx, aliceSub, domain.UpdateProfileRequest{Name: "Alice Johnson"})
 	wantOK(t, "update success", err)
-	// Non-numeric user id → authz rejection, never reaches the repo.
-	_, err = updOK.UpdateProfile(ctx, "abc", domain.UpdateProfileRequest{Name: "x"})
+	// Empty subject → authz rejection, never reaches the repo.
+	_, err = updOK.UpdateProfile(ctx, "", domain.UpdateProfileRequest{Name: "x"})
 	wantErr(t, "update unauthorized", err)
 	// Upsert failure is an internal error → must NOT touch the business counter.
-	updErr := svcWith(&mockRepo{upsertUserProfileFn: func(_ context.Context, _ int, _, _, _ string) error { return errRepo }})
-	_, err = updErr.UpdateProfile(ctx, "2", domain.UpdateProfileRequest{Name: "y"})
+	updErr := svcWith(&mockRepo{upsertUserProfileFn: func(_ context.Context, _ string, _, _, _ string) error { return errRepo }})
+	_, err = updErr.UpdateProfile(ctx, "a11ce000-0000-4000-8000-000000000002", domain.UpdateProfileRequest{Name: "y"})
 	wantErr(t, "update repo error", err)
 
 	upd := counterByLabel(t, reader, "user.profile_updated.total", "result")
@@ -114,27 +114,27 @@ func TestProfileMetrics(t *testing.T) {
 	pubHit := svcWith(&mockRepo{getUserFn: func(_ context.Context, id string) (*domain.User, error) {
 		return &domain.User{ID: id, Name: "Alice"}, nil
 	}})
-	_, err = pubHit.GetUser(ctx, "1")
+	_, err = pubHit.GetUser(ctx, aliceSub)
 	wantOK(t, "public hit", err)
 	pubMiss := svcWith(&mockRepo{getUserFn: func(_ context.Context, _ string) (*domain.User, error) {
 		return nil, domain.ErrUserNotFound
 	}})
-	_, err = pubMiss.GetUser(ctx, "999")
+	_, err = pubMiss.GetUser(ctx, "00000000-0000-4000-8000-000000000999")
 	wantErr(t, "public miss", err)
 	pubErr := svcWith(&mockRepo{getUserFn: func(_ context.Context, _ string) (*domain.User, error) { return nil, errRepo }})
-	_, err = pubErr.GetUser(ctx, "1")
+	_, err = pubErr.GetUser(ctx, aliceSub)
 	wantErr(t, "public internal error", err)
 
-	// --- profile_lookup private: hit (stored row) + miss (auth fallback).
-	privHit := svcWith(&mockRepo{getProfileByUserIDFn: func(_ context.Context, _ int) (*domain.UserProfile, error) {
+	// --- profile_lookup private: hit (stored row) + miss (JIT claims fallback).
+	privHit := svcWith(&mockRepo{getProfileByUserIDFn: func(_ context.Context, _ string) (*domain.UserProfile, error) {
 		return &domain.UserProfile{FirstName: strPtr("Alice")}, nil
 	}})
-	_, err = privHit.GetProfile(ctx, "1", "alice", "alice@example.com")
+	_, err = privHit.GetProfile(ctx, aliceSub, "alice", "alice@example.com")
 	wantOK(t, "private hit", err)
-	privMiss := svcWith(&mockRepo{getProfileByUserIDFn: func(_ context.Context, _ int) (*domain.UserProfile, error) {
+	privMiss := svcWith(&mockRepo{getProfileByUserIDFn: func(_ context.Context, _ string) (*domain.UserProfile, error) {
 		return nil, nil
 	}})
-	_, err = privMiss.GetProfile(ctx, "2", "bob", "bob@example.com")
+	_, err = privMiss.GetProfile(ctx, "a11ce000-0000-4000-8000-000000000002", "bob", "bob@example.com")
 	wantOK(t, "private miss", err)
 
 	look := lookupByAudienceFound(t, reader)
