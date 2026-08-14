@@ -160,3 +160,28 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID string, req doma
 	recordProfileUpdated(ctx, resultSuccess)
 	return user, nil
 }
+
+// SearchProfiles serves the Backoffice operator search (RFC-0023 slice A) —
+// a pass-through with the platform's observability conventions; the sensitive
+// shaping (what an operator may see) happens in the web layer.
+func (s *UserService) SearchProfiles(ctx context.Context, query string, limit, offset int) ([]domain.UserProfile, int, error) {
+	items, total, err := s.repo.SearchProfiles(ctx, query, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("search profiles: %w", err)
+	}
+	return items, total, nil
+}
+
+// GetProfileRecord returns the raw profile row for the Backoffice case view
+// (RFC-0023). Unlike GetProfile it does not synthesize display fields from
+// token claims — the operator sees exactly what this service stores.
+func (s *UserService) GetProfileRecord(ctx context.Context, userID string) (*domain.UserProfile, error) {
+	profile, err := s.repo.GetProfileByUserID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("get profile record: %w", err)
+	}
+	if profile == nil {
+		return nil, domain.ErrUserNotFound
+	}
+	return profile, nil
+}

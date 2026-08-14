@@ -10,6 +10,7 @@ import (
 // for table-driven tests. Each field holds the function invoked by the matching
 // interface method, letting every test case wire up only the behavior it needs.
 type mockRepo struct {
+	searchErr            error
 	getUserFn            func(ctx context.Context, id string) (*domain.User, error)
 	getProfileByUserIDFn func(ctx context.Context, userID string) (*domain.UserProfile, error)
 	updateUserProfileFn  func(ctx context.Context, userID string, firstName, lastName, phone string) (bool, error)
@@ -34,3 +35,7 @@ func (m *mockRepo) UpsertUserProfile(ctx context.Context, userID string, firstNa
 
 // strPtr returns a pointer to s, for populating UserProfile's optional fields.
 func strPtr(s string) *string { return &s }
+
+func (m *mockRepo) SearchProfiles(_ context.Context, _ string, _, _ int) ([]domain.UserProfile, int, error) {
+	return nil, 0, m.searchErr
+}
