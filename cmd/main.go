@@ -124,8 +124,20 @@ func main() {
 		logger.Fatal("Failed to initialize JWT verifier", zap.Error(err))
 	}
 
+	// Second verifier for the protected Backoffice group (ADR-050): operators
+	// live in the WORKFORCE realm; the customer verifier above never sees
+	// their tokens and vice versa.
+	staffVerifier, err := authmw.NewVerifier(authmw.Config{
+		Issuer:   cfg.OIDCStaffIssuer,
+		Audience: cfg.OIDCAudience,
+		JWKSURL:  cfg.OIDCStaffJWKSURL,
+	})
+	if err != nil {
+		logger.Fatal("Failed to initialize staff JWT verifier", zap.Error(err))
+	}
+
 	var isShuttingDown atomic.Bool
-	srv := setupServer(cfg, logger, verifier, &isShuttingDown, userHandler)
+	srv := setupServer(cfg, logger, verifier, staffVerifier, &isShuttingDown, userHandler)
 	runGracefulShutdown(cfg, srv, tp, pool, logger, &isShuttingDown)
 }
 
@@ -215,7 +227,7 @@ func initProfiling(cfg *config.Config, logger *zap.Logger) func(context.Context)
 	return stop
 }
 
-func setupServer(cfg *config.Config, logger *zap.Logger, verifier *authmw.Verifier, isShuttingDown *atomic.Bool, userHandler *webv1.UserHandler) *http.Server {
+func setupServer(cfg *config.Config, logger *zap.Logger, verifier *authmw.Verifier, staffVerifier *authmw.Verifier, isShuttingDown *atomic.Bool, userHandler *webv1.UserHandler) *http.Server {
 	r := gin.Default()
 
 	r.Use(middleware.TracingMiddleware())
@@ -234,6 +246,10 @@ func setupServer(cfg *config.Config, logger *zap.Logger, verifier *authmw.Verifi
 
 	// User v1 routes — Variant A edge naming (see api-naming-convention.md)
 	r.GET("/user/v1/public/users/:id", userHandler.GetUser)
+
+	// Protected: the Backoffice operator search + case view (RFC-0023),
+	// staff-realm verified + role-gated; customer routes are untouched.
+	webv1.RegisterProtectedRoutes(r, userHandler, staffVerifier)
 
 	privateUsers := r.Group("/user/v1/private/users")
 	privateUsers.Use(authmw.MiddlewareJWT(verifier))

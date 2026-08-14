@@ -34,3 +34,7 @@ func (m *mockRepo) UpsertUserProfile(ctx context.Context, userID string, firstNa
 
 // strPtr returns a pointer to s, for populating UserProfile's optional fields.
 func strPtr(s string) *string { return &s }
+
+func (m *mockRepo) SearchProfiles(_ context.Context, _ string, _, _ int) ([]domain.UserProfile, int, error) {
+	return nil, 0, nil
+}

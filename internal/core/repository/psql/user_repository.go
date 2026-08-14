@@ -76,7 +76,7 @@ func (r *UserRepository) GetProfileByUserID(ctx context.Context, userID string) 
 	}
 
 	var profile domain.UserProfile
-	query := `SELECT id, user_id, first_name, last_name, phone, address FROM user_profiles WHERE user_id = $1`
+	query := `SELECT id, user_id, first_name, last_name, phone, address, created_at, updated_at FROM user_profiles WHERE user_id = $1`
 
 	err := db.QueryRow(ctx, query, userID).Scan(
 		&profile.ID,
@@ -85,6 +85,8 @@ func (r *UserRepository) GetProfileByUserID(ctx context.Context, userID string) 
 		&profile.LastName,
 		&profile.Phone,
 		&profile.Address,
+		&profile.CreatedAt,
+		&profile.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -133,4 +135,44 @@ func (r *UserRepository) UpsertUserProfile(ctx context.Context, userID string, f
 		return fmt.Errorf("create profile: %w", err)
 	}
 	return nil
+}
+
+// SearchProfiles implements the Backoffice operator search (RFC-0023):
+// case-insensitive name/phone match or exact user_id, newest first.
+func (r *UserRepository) SearchProfiles(ctx context.Context, query string, limit, offset int) ([]domain.UserProfile, int, error) {
+	where := ""
+	args := []any{}
+	if query != "" {
+		args = append(args, "%"+query+"%", query)
+		where = ` WHERE first_name ILIKE $1 OR last_name ILIKE $1 OR phone ILIKE $1 OR user_id = $2`
+	}
+
+	var total int
+	if err := r.pool.QueryRow(ctx, "SELECT count(*) FROM user_profiles"+where, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count profiles: %w", err)
+	}
+
+	q := fmt.Sprintf(`
+		SELECT id, user_id, first_name, last_name, phone, address, created_at, updated_at
+		FROM user_profiles%s
+		ORDER BY id DESC
+		LIMIT $%d OFFSET $%d`, where, len(args)+1, len(args)+2)
+	rows, err := r.pool.Query(ctx, q, append(args, limit, offset)...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("search profiles: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]domain.UserProfile, 0)
+	for rows.Next() {
+		var p domain.UserProfile
+		if err := rows.Scan(&p.ID, &p.UserID, &p.FirstName, &p.LastName, &p.Phone, &p.Address, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, 0, fmt.Errorf("scan profile: %w", err)
+		}
+		items = append(items, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate profiles: %w", err)
+	}
+	return items, total, nil
 }

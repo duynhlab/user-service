@@ -49,6 +49,10 @@ type Config struct {
 	OIDCIssuer          string // Expected OIDC issuer (Keycloak realm) - from OIDC_ISSUER env
 	OIDCAudience        string // Expected OIDC audience - from OIDC_AUDIENCE env
 	OIDCJWKSURL         string // Optional JWKS endpoint override - from OIDC_JWKS_URL env (empty: authmw derives it from the issuer)
+	// Staff-realm verification for the protected Backoffice group
+	// (RFC-0023 + ADR-050) — the private customer group keeps OIDC_ISSUER.
+	OIDCStaffIssuer  string // OIDC_STAFF_ISSUER (iss, exact match)
+	OIDCStaffJWKSURL string // OIDC_STAFF_JWKS_URL (empty = derived from issuer)
 }
 
 // ServiceConfig defines basic service configuration
@@ -153,6 +157,8 @@ func Load() *Config {
 		ReadinessDrainDelay: getEnvDurationSecondsWithMax("READINESS_DRAIN_DELAY", 5, 30),
 		OIDCIssuer:          getEnv("OIDC_ISSUER", "https://id.duynh.me/realms/duynhlab"),
 		OIDCAudience:        getEnv("OIDC_AUDIENCE", "duynhlab-platform"),
+		OIDCStaffIssuer:     getEnv("OIDC_STAFF_ISSUER", "https://id.duynh.me/realms/duynhlab-staff"),
+		OIDCStaffJWKSURL:    getEnv("OIDC_STAFF_JWKS_URL", ""),
 		OIDCJWKSURL:         getEnv("OIDC_JWKS_URL", ""),
 	}
 }

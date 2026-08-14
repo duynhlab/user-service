@@ -43,6 +43,10 @@ func (m *mockUserRepo) UpsertUserProfile(ctx context.Context, userID string, fir
 	return m.upsertUserProfileFn(ctx, userID, firstName, lastName, phone)
 }
 
+func (m *mockUserRepo) SearchProfiles(_ context.Context, _ string, _, _ int) ([]domain.UserProfile, int, error) {
+	return nil, 0, nil
+}
+
 func newHandler(repo domain.UserRepository) *UserHandler {
 	return NewUserHandler(logicv1.NewUserService(repo))
 }
