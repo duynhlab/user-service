@@ -20,9 +20,11 @@ func strp(s string) *string { return &s }
 
 // searchRepo scripts the widened repository for the protected surface.
 type searchRepo struct {
-	items []domain.UserProfile
-	total int
-	got   struct {
+	items     []domain.UserProfile
+	total     int
+	searchErr error
+	detailErr error
+	got       struct {
 		query         string
 		limit, offset int
 	}
@@ -31,7 +33,7 @@ type searchRepo struct {
 
 func (m *searchRepo) GetUser(_ context.Context, _ string) (*domain.User, error) { return nil, nil }
 func (m *searchRepo) GetProfileByUserID(_ context.Context, _ string) (*domain.UserProfile, error) {
-	return m.profile, nil
+	return m.profile, m.detailErr
 }
 func (m *searchRepo) UpdateUserProfile(_ context.Context, _ string, _, _, _ string) (bool, error) {
 	return false, nil
@@ -41,7 +43,7 @@ func (m *searchRepo) UpsertUserProfile(_ context.Context, _ string, _, _, _ stri
 }
 func (m *searchRepo) SearchProfiles(_ context.Context, query string, limit, offset int) ([]domain.UserProfile, int, error) {
 	m.got.query, m.got.limit, m.got.offset = query, limit, offset
-	return m.items, m.total, nil
+	return m.items, m.total, m.searchErr
 }
 
 func protectedEngine(t *testing.T, repo domain.UserRepository, roles ...string) *gin.Engine {
@@ -124,5 +126,34 @@ func TestGetUserDetail(t *testing.T) {
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/user/v1/protected/users/u-missing", nil))
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("want 404, got %d", w.Code)
+	}
+}
+
+func TestProtectedUsersErrorBranches(t *testing.T) {
+	r := protectedEngine(t, &searchRepo{searchErr: context.DeadlineExceeded, detailErr: context.DeadlineExceeded}, backofficeRole)
+	for _, path := range []string{"/user/v1/protected/users", "/user/v1/protected/users/u-1"} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		if w.Code != http.StatusInternalServerError {
+			t.Fatalf("%s: want 500, got %d", path, w.Code)
+		}
+	}
+}
+
+func TestRegisterProtectedRoutesRealChain(t *testing.T) {
+	verifier, err := authmw.NewVerifier(authmw.Config{
+		Issuer:   "http://localhost:8081/realms/duynhlab-staff",
+		Audience: "duynhlab-platform",
+	})
+	if err != nil {
+		t.Fatalf("verifier: %v", err)
+	}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	RegisterProtectedRoutes(r, NewUserHandler(logicv1.NewUserService(&searchRepo{})), verifier)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/user/v1/protected/users", nil))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("tokenless: want 401 from the real chain, got %d", w.Code)
 	}
 }

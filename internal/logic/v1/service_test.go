@@ -264,3 +264,31 @@ func TestUserService_UpdateProfile(t *testing.T) {
 		})
 	}
 }
+
+func TestSearchProfilesPassThrough(t *testing.T) {
+	m := &mockRepo{}
+	svc := svcWith(m)
+	if _, _, err := svc.SearchProfiles(context.Background(), "ali", 20, 0); err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	// error branch: preserved and wrapped
+	bad := svcWith(&mockRepo{searchErr: context.DeadlineExceeded})
+	if _, _, err := bad.SearchProfiles(context.Background(), "x", 20, 0); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("search error not preserved: %v", err)
+	}
+}
+
+func TestGetProfileRecord(t *testing.T) {
+	m := &mockRepo{getProfileByUserIDFn: func(_ context.Context, _ string) (*domain.UserProfile, error) {
+		return &domain.UserProfile{UserID: "u-1"}, nil
+	}}
+	if p, err := svcWith(m).GetProfileRecord(context.Background(), "u-1"); err != nil || p.UserID != "u-1" {
+		t.Fatalf("record: %v %v", p, err)
+	}
+	m2 := &mockRepo{getProfileByUserIDFn: func(_ context.Context, _ string) (*domain.UserProfile, error) {
+		return nil, nil
+	}}
+	if _, err := svcWith(m2).GetProfileRecord(context.Background(), "u-x"); !errors.Is(err, domain.ErrUserNotFound) {
+		t.Fatalf("want ErrUserNotFound, got %v", err)
+	}
+}
