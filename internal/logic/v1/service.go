@@ -6,11 +6,17 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/duynhlab/pkg/obsx"
 	"github.com/duynhlab/user-service/internal/core/domain"
-	"github.com/duynhlab/user-service/middleware"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
+
+// tracerScope is the OpenTelemetry instrumentation scope for this package's
+// spans: it names the CODE that creates them, which is why it is a package path
+// and not the service name. Deployment identity travels separately as
+// service.name on the Resource.
+const tracerScope = "github.com/duynhlab/user-service/internal/logic/v1"
 
 // UserService defines the business logic for user management
 type UserService struct {
@@ -26,7 +32,7 @@ func NewUserService(repo domain.UserRepository) *UserService {
 
 // GetUser retrieves a user by ID
 func (s *UserService) GetUser(ctx context.Context, id string) (*domain.User, error) {
-	_, span := middleware.StartSpan(ctx, "user.get", trace.WithAttributes(
+	_, span := obsx.StartSpan(ctx, tracerScope, "user.get", trace.WithAttributes(
 		attribute.String("layer", "logic"),
 		attribute.String("user.id", id),
 	))
@@ -52,7 +58,7 @@ func (s *UserService) GetUser(ctx context.Context, id string) (*domain.User, err
 // userID is the verified OIDC token subject (opaque string); username and
 // email are the verified token claims — all set by the auth middleware.
 func (s *UserService) GetProfile(ctx context.Context, userID string, username, email string) (*domain.User, error) {
-	ctx, span := middleware.StartSpan(ctx, "user.profile", trace.WithAttributes(
+	ctx, span := obsx.StartSpan(ctx, tracerScope, "user.profile", trace.WithAttributes(
 		attribute.String("layer", "logic"),
 		attribute.String("user.id", userID),
 	))
@@ -120,7 +126,7 @@ func (s *UserService) GetProfile(ctx context.Context, userID string, username, e
 // UpdateProfile upserts the current user's profile. userID is the verified
 // OIDC token subject; the upsert is the JIT provisioning write path.
 func (s *UserService) UpdateProfile(ctx context.Context, userID string, req domain.UpdateProfileRequest) (*domain.User, error) {
-	ctx, span := middleware.StartSpan(ctx, "user.update_profile", trace.WithAttributes(
+	ctx, span := obsx.StartSpan(ctx, tracerScope, "user.update_profile", trace.WithAttributes(
 		attribute.String("layer", "logic"),
 		attribute.String("user_id", userID),
 	))

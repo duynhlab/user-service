@@ -21,6 +21,7 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	"github.com/duynhlab/pkg/authmw"
+	"github.com/duynhlab/pkg/httpmw"
 	"github.com/duynhlab/pkg/logger/zapx"
 	"github.com/duynhlab/pkg/migratex"
 	"github.com/duynhlab/pkg/obsx"
@@ -31,7 +32,6 @@ import (
 	"github.com/duynhlab/user-service/internal/core/repository/psql"
 	logicv1 "github.com/duynhlab/user-service/internal/logic/v1"
 	webv1 "github.com/duynhlab/user-service/internal/web/v1"
-	"github.com/duynhlab/user-service/middleware"
 )
 
 func main() {
@@ -66,7 +66,6 @@ func main() {
 	// The config is built once so the tracer scope name and the startup log
 	// reflect the values obsx actually uses.
 	otelCfg := obsx.ConfigFromEnv()
-	middleware.SetServiceName(otelCfg.ServiceName)
 	var tp interface{ Shutdown(context.Context) error }
 	obs, err := obsx.SetupObservability(context.Background(), otelCfg)
 	if err != nil {
@@ -137,7 +136,7 @@ func main() {
 	}
 
 	var isShuttingDown atomic.Bool
-	srv := setupServer(cfg, logger, verifier, staffVerifier, &isShuttingDown, userHandler)
+	srv := setupServer(cfg, obsx.ConfigFromEnv().ServiceName, logger, verifier, staffVerifier, &isShuttingDown, userHandler)
 	runGracefulShutdown(cfg, srv, tp, pool, logger, &isShuttingDown)
 }
 
@@ -227,11 +226,11 @@ func initProfiling(cfg *config.Config, logger *zap.Logger) func(context.Context)
 	return stop
 }
 
-func setupServer(cfg *config.Config, logger *zap.Logger, verifier *authmw.Verifier, staffVerifier *authmw.Verifier, isShuttingDown *atomic.Bool, userHandler *webv1.UserHandler) *http.Server {
+func setupServer(cfg *config.Config, otelServiceName string, logger *zap.Logger, verifier *authmw.Verifier, staffVerifier *authmw.Verifier, isShuttingDown *atomic.Bool, userHandler *webv1.UserHandler) *http.Server {
 	r := gin.Default()
 
-	r.Use(middleware.TracingMiddleware())
-	r.Use(middleware.LoggingMiddleware(logger))
+	r.Use(httpmw.Tracing(otelServiceName))
+	r.Use(httpmw.Logging(logger))
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
