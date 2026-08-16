@@ -5,10 +5,10 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/duynhlab/pkg/httpmw"
 	"github.com/duynhlab/pkg/httpx"
 	"github.com/duynhlab/user-service/internal/core/domain"
 	logicv1 "github.com/duynhlab/user-service/internal/logic/v1"
-	"github.com/duynhlab/pkg/httpmw"
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
