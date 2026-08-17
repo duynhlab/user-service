@@ -5,10 +5,10 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/duynhlab/pkg/httpmw"
 	"github.com/duynhlab/pkg/httpx"
 	"github.com/duynhlab/user-service/internal/core/domain"
 	logicv1 "github.com/duynhlab/user-service/internal/logic/v1"
-	"github.com/duynhlab/user-service/middleware"
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -41,7 +41,7 @@ func NewUserHandler(service *logicv1.UserService) *UserHandler {
 // returned handle. The caller must NOT end it; otelgin owns its lifecycle.
 func beginRequest(c *gin.Context) (context.Context, trace.Span, *zap.Logger) {
 	ctx := c.Request.Context()
-	return ctx, trace.SpanFromContext(ctx), middleware.GetLoggerFromGinContext(c)
+	return ctx, trace.SpanFromContext(ctx), httpmw.LoggerFrom(c)
 }
 
 // GetUser handles HTTP request to get a user by ID

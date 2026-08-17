@@ -52,7 +52,10 @@ func lookupByAudienceFound(t *testing.T, reader sdkmetric.Reader) map[string]int
 			if m.Name != "user.profile_lookup.total" {
 				continue
 			}
-			sum := m.Data.(metricdata.Sum[int64])
+			sum, ok := m.Data.(metricdata.Sum[int64])
+			if !ok {
+				t.Fatalf("%s is %T, want Sum[int64]", m.Name, m.Data)
+			}
 			for _, dp := range sum.DataPoints {
 				aud, _ := dp.Attributes.Value(attribute.Key("audience"))
 				found, _ := dp.Attributes.Value(attribute.Key("found"))
