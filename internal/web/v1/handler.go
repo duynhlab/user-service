@@ -85,15 +85,7 @@ func (h *UserHandler) GetProfile(c *gin.Context) {
 
 	user, err := h.service.GetProfile(ctx, userID, username, email)
 	if err != nil {
-		span.RecordError(err)
-		slogx.FromContext(ctx).Error(ctx, "Failed to get profile", slogx.Err(err))
-
-		switch {
-		case errors.Is(err, domain.ErrUnauthorized):
-			httpx.RespondError(c, http.StatusForbidden, httpx.CodeForbidden, "Unauthorized access")
-		default:
-			httpx.RespondError(c, http.StatusInternalServerError, httpx.CodeInternal, "Internal server error")
-		}
+		respondProfileError(c, span, "Failed to get profile", err)
 		return
 	}
 
@@ -126,18 +118,23 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 
 	user, err := h.service.UpdateProfile(ctx, userID, req)
 	if err != nil {
-		span.RecordError(err)
-		slogx.FromContext(ctx).Error(ctx, "Failed to update profile", slogx.Err(err))
-
-		switch {
-		case errors.Is(err, domain.ErrUnauthorized):
-			httpx.RespondError(c, http.StatusForbidden, httpx.CodeForbidden, "Unauthorized access")
-		default:
-			httpx.RespondError(c, http.StatusInternalServerError, httpx.CodeInternal, "Internal server error")
-		}
+		respondProfileError(c, span, "Failed to update profile", err)
 		return
 	}
 
 	slogx.FromContext(ctx).Info(ctx, "Profile updated")
 	c.JSON(http.StatusOK, user)
+}
+
+// respondProfileError records a profile operation's failure on the span and
+// the log, and answers 403 for an ownership refusal, 500 otherwise.
+func respondProfileError(c *gin.Context, span trace.Span, msg string, err error) {
+	ctx := c.Request.Context()
+	span.RecordError(err)
+	slogx.FromContext(ctx).Error(ctx, msg, slogx.Err(err))
+	if errors.Is(err, domain.ErrUnauthorized) {
+		httpx.RespondError(c, http.StatusForbidden, httpx.CodeForbidden, "Unauthorized access")
+		return
+	}
+	httpx.RespondError(c, http.StatusInternalServerError, httpx.CodeInternal, "Internal server error")
 }
