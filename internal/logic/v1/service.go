@@ -46,7 +46,7 @@ func (s *UserService) GetUser(ctx context.Context, id string) (*domain.User, err
 		if errors.Is(err, domain.ErrUserNotFound) {
 			recordProfileLookup(ctx, audiencePublic, false)
 		}
-		return nil, fmt.Errorf("get user by id %q: %w", id, err)
+		return nil, fmt.Errorf("get user by id: %w", err)
 	}
 
 	span.SetAttributes(attribute.Bool("user.found", true))

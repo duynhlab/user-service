@@ -39,7 +39,7 @@ func (r *UserRepository) GetUser(ctx context.Context, id string) (*domain.User, 
 
 	profile, err := r.GetProfileByUserID(ctx, id)
 	if err != nil {
-		return nil, fmt.Errorf("get user %q: %w", id, err)
+		return nil, fmt.Errorf("get user: %w", err)
 	}
 	if profile == nil {
 		return nil, domain.ErrUserNotFound
