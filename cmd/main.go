@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,12 +18,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 
 	"github.com/duynhlab/pkg/authmw"
 	"github.com/duynhlab/pkg/httpmw"
-	"github.com/duynhlab/pkg/logger/zapx"
+	"github.com/duynhlab/pkg/logger/slogx"
 	"github.com/duynhlab/pkg/migratex"
 	"github.com/duynhlab/pkg/obsx"
 	"github.com/duynhlab/user-service/config"
@@ -36,16 +35,14 @@ import (
 
 func main() {
 	cfg := config.Load()
+	ctx := context.Background()
 
-	logger, err := zapx.New(os.Getenv("LOG_LEVEL"))
-	if err != nil {
-		panic("Failed to initialize logger: " + err.Error())
-	}
-	defer func() { _ = logger.Sync() }()
+	logger := slogx.New(slogx.Config{Level: os.Getenv("LOG_LEVEL")})
+	slogx.SetDefault(logger)
 
 	// Subcommands (`migrate`, `seed`) run an embedded SQL set and exit; no args
 	// serves the app.
-	if len(os.Args) > 1 && runSubcommand(os.Args[1], cfg, logger) {
+	if len(os.Args) > 1 && runSubcommand(ctx, os.Args[1], cfg, logger) {
 		return
 	}
 
@@ -53,11 +50,9 @@ func main() {
 		panic("Configuration validation failed: " + err.Error())
 	}
 
-	logger.Info("Service starting",
-		zap.String("service", cfg.Service.Name),
-		zap.String("version", cfg.Service.Version),
-		zap.String("env", cfg.Service.Env),
-		zap.String("port", cfg.Service.Port),
+	logger.Info(ctx, "Service starting",
+		slog.String("service.version", cfg.Service.Version),
+		slog.String("deployment.environment.name", cfg.Service.Env),
 	)
 
 	// RFC-0014: single OTel wiring point — traces per TRACING_ENABLED, OTLP
@@ -67,42 +62,35 @@ func main() {
 	// reflect the values obsx actually uses.
 	otelCfg := obsx.ConfigFromEnv()
 	var tp interface{ Shutdown(context.Context) error }
-	obs, err := obsx.SetupObservability(context.Background(), otelCfg)
+	obs, err := obsx.SetupObservability(ctx, otelCfg)
 	if err != nil {
-		logger.Warn("Failed to initialize OpenTelemetry", zap.Error(err))
+		logger.Warn(ctx, "Failed to initialize OpenTelemetry", slogx.Err(err))
 	} else {
 		tp = obs
-		// RFC-0014 P4: tee application logs into the OTLP pipeline. ZapCore
-		// returns a NopCore when OTEL_LOGS_ENABLED is off, so the tee is
-		// unconditional; the min level mirrors the stdout core so debug
-		// lines never leave the pod on an info-level service.
-		minLevel, err := zapcore.ParseLevel(os.Getenv("LOG_LEVEL"))
-		if err != nil {
-			minLevel = zapcore.InfoLevel
-		}
-		logger = logger.WithOptions(zap.WrapCore(func(c zapcore.Core) zapcore.Core {
-			return zapcore.NewTee(c, obs.ZapCore(otelCfg.ServiceName, minLevel))
-		}))
-		logger.Info("OpenTelemetry initialized",
-			zap.Bool("traces", obs.Enabled().Traces),
-			zap.Bool("otlp_metrics", obs.Enabled().Metrics),
-			zap.Bool("otlp_logs", obs.Enabled().Logs),
-			zap.String("endpoint", otelCfg.Endpoint),
-			zap.Float64("sample_rate", otelCfg.SampleRate),
+		// The facade reaches OTLP through the global logger provider obsx
+		// just installed; rebuilding it only wires Flush, so a Fatal record
+		// is exported before the process exits.
+		logger = slogx.New(slogx.Config{Level: os.Getenv("LOG_LEVEL"), Flush: obs.ForceFlush})
+		slogx.SetDefault(logger)
+		logger.Info(ctx, "OpenTelemetry initialized",
+			slog.Bool("traces", obs.Enabled().Traces),
+			slog.Bool("otlp_metrics", obs.Enabled().Metrics),
+			slog.Bool("otlp_logs", obs.Enabled().Logs),
+			slog.Float64("sample_rate", otelCfg.SampleRate),
 		)
 	}
 
-	if stopProfiling := initProfiling(cfg, logger); stopProfiling != nil {
+	if stopProfiling := initProfiling(ctx, cfg, logger); stopProfiling != nil {
 		defer func() { _ = stopProfiling(context.Background()) }()
 	}
 
-	pool, err := database.Connect(context.Background(), cfg)
+	pool, err := database.Connect(ctx, cfg)
 	if err != nil {
-		logger.Error("Failed to connect to database", zap.Error(err))
+		logger.Error(ctx, "Failed to connect to database", slogx.Err(err))
 		return
 	}
 	defer pool.Close()
-	logger.Info("Database connection pool established")
+	logger.Info(ctx, "Database connection pool established")
 
 	// Initialize Dependency Injection
 	userRepo := psql.NewUserRepository(pool)
@@ -120,7 +108,7 @@ func main() {
 		JWKSURL:  cfg.OIDCJWKSURL,
 	})
 	if err != nil {
-		logger.Fatal("Failed to initialize JWT verifier", zap.Error(err))
+		logger.Fatal(ctx, "Failed to initialize JWT verifier", slogx.Err(err))
 	}
 
 	// Second verifier for the protected Backoffice group (ADR-050): operators
@@ -132,7 +120,7 @@ func main() {
 		JWKSURL:  cfg.OIDCStaffJWKSURL,
 	})
 	if err != nil {
-		logger.Fatal("Failed to initialize staff JWT verifier", zap.Error(err))
+		logger.Fatal(ctx, "Failed to initialize staff JWT verifier", slogx.Err(err))
 	}
 
 	var isShuttingDown atomic.Bool
@@ -148,23 +136,23 @@ func main() {
 // environment (init container, direct DB host). `seed` applies DEV-ONLY demo
 // data and is invoked explicitly — never by `migrate` or the serve path — so
 // production databases are never seeded.
-func runSubcommand(cmd string, cfg *config.Config, logger *zap.Logger) bool {
+func runSubcommand(ctx context.Context, cmd string, cfg *config.Config, logger *slogx.Logger) bool {
 	switch cmd {
 	case "migrate":
 		if err := migratex.Run(migrations.FS, "sql", cfg.Database.BuildDSN()); err != nil {
-			logger.Fatal("Schema migration failed", zap.Error(err))
+			logger.Fatal(ctx, "Schema migration failed", slogx.Err(err))
 		}
-		logger.Info("Schema migrations applied")
+		logger.Info(ctx, "Schema migrations applied")
 		return true
 	case "seed":
 		// Demo data is DEV-ONLY; refuse to seed a production database.
 		if cfg.IsProduction() {
-			logger.Fatal("seed refused in production — demo data is dev-only")
+			logger.Fatal(ctx, "seed refused in production — demo data is dev-only")
 		}
-		if err := applySeed(context.Background(), cfg); err != nil {
-			logger.Fatal("Demo seed failed", zap.Error(err))
+		if err := applySeed(ctx, cfg); err != nil {
+			logger.Fatal(ctx, "Demo seed failed", slogx.Err(err))
 		}
-		logger.Info("Demo seed data applied")
+		logger.Info(ctx, "Demo seed data applied")
 		return true
 	default:
 		return false
@@ -212,25 +200,28 @@ func applySeed(ctx context.Context, cfg *config.Config) error {
 	return nil
 }
 
-func initProfiling(cfg *config.Config, logger *zap.Logger) func(context.Context) error {
+func initProfiling(ctx context.Context, cfg *config.Config, logger *slogx.Logger) func(context.Context) error {
 	if !cfg.Profiling.Enabled {
-		logger.Info("Profiling disabled (PROFILING_ENABLED=false)")
+		logger.Info(ctx, "Profiling disabled (PROFILING_ENABLED=false)")
 		return nil
 	}
 	stop, err := obsx.SetupProfiling()
 	if err != nil {
-		logger.Warn("Failed to initialize profiling", zap.Error(err))
+		logger.Warn(ctx, "Failed to initialize profiling", slogx.Err(err))
 		return nil
 	}
-	logger.Info("Profiling initialized", zap.String("endpoint", cfg.Profiling.Endpoint))
+	logger.Info(ctx, "Profiling initialized")
 	return stop
 }
 
-func setupServer(cfg *config.Config, otelServiceName string, logger *zap.Logger, verifier *authmw.Verifier, staffVerifier *authmw.Verifier, isShuttingDown *atomic.Bool, userHandler *webv1.UserHandler) *http.Server {
-	r := gin.Default()
+func setupServer(cfg *config.Config, otelServiceName string, logger *slogx.Logger, verifier *authmw.Verifier, staffVerifier *authmw.Verifier, isShuttingDown *atomic.Bool, userHandler *webv1.UserHandler) *http.Server {
+	// gin.New, not gin.Default: Default installs gin's own logger and
+	// recovery, which print the raw path and client address past the facade.
+	r := gin.New()
 
 	r.Use(httpmw.Tracing(otelServiceName))
-	r.Use(httpmw.Logging(logger))
+	r.Use(httpmw.Logging(logger.Slog()))
+	r.Use(httpmw.Recovery(logger.Slog()))
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
@@ -269,53 +260,61 @@ func runGracefulShutdown(
 	srv *http.Server,
 	tp interface{ Shutdown(context.Context) error },
 	pool interface{ Close() },
-	logger *zap.Logger,
+	logger *slogx.Logger,
 	isShuttingDown *atomic.Bool,
 ) {
+	bg := context.Background()
 	go func() {
-		logger.Info("Starting user service", zap.String("port", cfg.Service.Port))
+		logger.Info(bg, "Starting user service", slog.String("port", cfg.Service.Port))
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("Failed to start server", zap.Error(err))
+			logger.Error(bg, "Failed to start server", slogx.Err(err))
 		}
 	}()
+	logger.ProcessStarted(bg, slogx.ComponentAPI)
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	ctx, stop := signal.NotifyContext(bg, syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
 	<-ctx.Done()
-	logger.Info("Shutdown signal received")
+	logger.Info(bg, "Shutdown signal received")
 
 	isShuttingDown.Store(true)
 	drainDelay := cfg.GetReadinessDrainDelayDuration()
 	if drainDelay > 0 {
-		logger.Info("Readiness drain delay started", zap.Duration("delay", drainDelay))
+		logger.Info(bg, "Readiness drain delay started", slog.Duration("delay", drainDelay))
 		time.Sleep(drainDelay)
 	}
 
 	shutdownTimeout := cfg.GetShutdownTimeoutDuration()
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	shutdownCtx, cancel := context.WithTimeout(bg, shutdownTimeout)
 	defer cancel()
 
-	logger.Info("Shutting down server...", zap.Duration("timeout", shutdownTimeout))
+	logger.Info(bg, "Shutting down server...", slog.Duration("timeout", shutdownTimeout))
 
+	outcome := slogx.OutcomeGraceful
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		logger.Error("HTTP server shutdown error", zap.Error(err))
+		outcome = slogx.OutcomeError
+		logger.Error(bg, "HTTP server shutdown error", slogx.Err(err))
 	} else {
-		logger.Info("HTTP server shutdown complete")
+		logger.Info(bg, "HTTP server shutdown complete")
 	}
 
 	pool.Close()
-	logger.Info("Database pool closed")
+	logger.Info(bg, "Database pool closed")
+
+	// process.stopped is written BEFORE the OTel SDK shuts down: a record
+	// emitted after it is dropped rather than exported.
+	logger.ProcessStopped(bg, slogx.ComponentAPI, outcome)
 
 	// Shutdown the OTel SDK — flushes pending spans plus any OTLP
 	// metrics/logs providers built behind the RFC-0014 flags.
 	if tp != nil {
 		if err := tp.Shutdown(shutdownCtx); err != nil {
-			logger.Error("OpenTelemetry shutdown error", zap.Error(err))
+			logger.Error(bg, "OpenTelemetry shutdown error", slogx.Err(err))
 		} else {
-			logger.Info("OpenTelemetry shutdown complete")
+			logger.Info(bg, "OpenTelemetry shutdown complete")
 		}
 	}
 
-	logger.Info("Graceful shutdown complete")
+	logger.Info(bg, "Graceful shutdown complete")
 }
