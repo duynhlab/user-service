@@ -53,6 +53,7 @@ func main() {
 	logger.Info(ctx, "Service starting",
 		slog.String("service.version", cfg.Service.Version),
 		slog.String("deployment.environment.name", cfg.Service.Env),
+		slog.String("port", cfg.Service.Port),
 	)
 
 	// RFC-0014: single OTel wiring point — traces per TRACING_ENABLED, OTLP
@@ -76,6 +77,7 @@ func main() {
 			slog.Bool("traces", obs.Enabled().Traces),
 			slog.Bool("otlp_metrics", obs.Enabled().Metrics),
 			slog.Bool("otlp_logs", obs.Enabled().Logs),
+			slog.String("endpoint", otelCfg.Endpoint),
 			slog.Float64("sample_rate", otelCfg.SampleRate),
 		)
 	}
@@ -210,7 +212,7 @@ func initProfiling(ctx context.Context, cfg *config.Config, logger *slogx.Logger
 		logger.Warn(ctx, "Failed to initialize profiling", slogx.Err(err))
 		return nil
 	}
-	logger.Info(ctx, "Profiling initialized")
+	logger.Info(ctx, "Profiling initialized", slog.String("endpoint", cfg.Profiling.Endpoint))
 	return stop
 }
 
