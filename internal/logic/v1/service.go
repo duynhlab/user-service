@@ -34,7 +34,6 @@ func NewUserService(repo domain.UserRepository) *UserService {
 func (s *UserService) GetUser(ctx context.Context, id string) (*domain.User, error) {
 	_, span := obsx.StartSpan(ctx, tracerScope, "user.get", trace.WithAttributes(
 		attribute.String("layer", "logic"),
-		attribute.String("user.id", id),
 	))
 	defer span.End()
 
@@ -60,7 +59,6 @@ func (s *UserService) GetUser(ctx context.Context, id string) (*domain.User, err
 func (s *UserService) GetProfile(ctx context.Context, userID string, username, email string) (*domain.User, error) {
 	ctx, span := obsx.StartSpan(ctx, tracerScope, "user.profile", trace.WithAttributes(
 		attribute.String("layer", "logic"),
-		attribute.String("user.id", userID),
 	))
 	defer span.End()
 
@@ -128,7 +126,6 @@ func (s *UserService) GetProfile(ctx context.Context, userID string, username, e
 func (s *UserService) UpdateProfile(ctx context.Context, userID string, req domain.UpdateProfileRequest) (*domain.User, error) {
 	ctx, span := obsx.StartSpan(ctx, tracerScope, "user.update_profile", trace.WithAttributes(
 		attribute.String("layer", "logic"),
-		attribute.String("user_id", userID),
 	))
 	defer span.End()
 
