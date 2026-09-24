@@ -62,8 +62,8 @@ github.com/duynhlab/pkg/logger/slogx v0.2.0 h1:h4HNr/xDwXJva6CG9LBQ6ZGkExmdSE1lS
 github.com/duynhlab/pkg/logger/slogx v0.2.0/go.mod h1:9edmpl0M2O0UiLpxjOjjyGGNIVH+/yCsoTeIvFnL5cQ=
 github.com/duynhlab/pkg/migratex v0.36.2 h1:Sab/5qFhXU7awrqXvwKCioXs4myOz2nAE8Wbc5x7bQ0=
 github.com/duynhlab/pkg/migratex v0.36.2/go.mod h1:rF/I+XnjX0k2BoTtfAkiuDe1U/2ztifUb+jHLzPP0Ro=
-github.com/duynhlab/pkg/obsx v0.45.0 h1:+w26qht5rv1f3THcsiUbMI+MqwqKI0+kg1jjTAgXHvE=
-github.com/duynhlab/pkg/obsx v0.45.0/go.mod h1:CfQDeE5o+Zo30BnyTpDYbubkHnyLyH+mhMNDjKD0tyE=
+github.com/duynhlab/pkg/obsx v0.46.0 h1:J7CT1wQIlYZtfYdGFWI5yn16bLHy0jXHZXVVnPidR6E=
+github.com/duynhlab/pkg/obsx v0.46.0/go.mod h1:CfQDeE5o+Zo30BnyTpDYbubkHnyLyH+mhMNDjKD0tyE=
 github.com/ebitengine/purego v0.10.0 h1:QIw4xfpWT6GWTzaW5XEKy3HXoqrJGx1ijYHzTF0/ISU=
 github.com/ebitengine/purego v0.10.0/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=
 github.com/exaring/otelpgx v0.11.1 h1:pE79fIg/qh/Lpu00kvswFC5dKfqyJJhMJ4Y4N3w5Lj4=

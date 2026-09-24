@@ -49,7 +49,6 @@ func (h *UserHandler) GetUser(c *gin.Context) {
 	ctx, span := beginRequest(c)
 
 	id := c.Param("id")
-	span.SetAttributes(attribute.String("user.id", id))
 
 	user, err := h.service.GetUser(ctx, id)
 	if err != nil {
