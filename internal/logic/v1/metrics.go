@@ -25,9 +25,11 @@ var (
 	meter = otel.Meter("user-service")
 
 	profileUpdatedCounter, _ = meter.Int64Counter("user.profile_updated.total",
-		metric.WithDescription("Profile-update attempts by outcome (successful write vs authz rejection)"))
+		metric.WithDescription("Profile-update attempts by outcome (successful write vs authz rejection)"),
+		metric.WithUnit("{update}"))
 	profileLookupCounter, _ = meter.Int64Counter("user.profile_lookup.total",
-		metric.WithDescription("Profile-lookup reads by caller audience and hit/miss"))
+		metric.WithDescription("Profile-lookup reads by caller audience and hit/miss"),
+		metric.WithUnit("{lookup}"))
 )
 
 // Profile-update outcomes (bounded).
