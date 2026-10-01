@@ -15,7 +15,7 @@ minimal public view of them.
 
 | Area | Technology |
 |------|------------|
-| Runtime | Go 1.26 |
+| Runtime | Go 1.27 |
 | Transports | HTTP only — no gRPC server, no client, no worker |
 | Data | PostgreSQL — one table, `user_profiles` |
 | Platform libraries | `authmw`, `dbx`, `httpx`, `logger/zapx`, `migratex`, `obsx` |
