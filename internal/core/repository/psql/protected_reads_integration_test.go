@@ -10,8 +10,8 @@ import (
 // TestSearchProfiles_Integration proves the operator search over the real
 // schema (RFC-0023): name/phone ILIKE, exact user_id, paging + total.
 func TestSearchProfiles_Integration(t *testing.T) {
-	pool := newTestDB(t)
-	repo := NewUserRepository(pool)
+	db := newTestDB(t)
+	repo := NewUserRepository(db.runtime)
 	ctx := context.Background()
 
 	seed := []struct{ id, first, last, phone string }{

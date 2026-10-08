@@ -109,9 +109,26 @@ Rules an implementer can violate at the keyboard.
   first-writes for the same user can collide on the unique index. Do not build on
   an idempotency guarantee that is not there — the contract records this gap.
 - **Pooler-safe database settings live in `pkg/dbx`.** Simple protocol and
-  disabled statement caches are required by the pooler. One DSN serves the app
-  and migrations so both connect identically; pool sizing stays off the DSN
-  because the driver migrations use rejects `pool_*` parameters.
+  disabled statement caches are required by the pooler. Pool sizing stays off
+  the DSN because the driver migrations use rejects `pool_*` parameters.
+- **Two identities, one DSN builder** (homelab RFC-0029). The app logs in as
+  `user_runtime`, which has CRUD on `user_profiles` and owns nothing. `migrate`
+  and `seed` log in as `user_migrator` and switch to `user_owner` with
+  `SET ROLE` (`DB_MIGRATION_ROLE`; `migratex.WithSetRole` and the seed pool's
+  `AfterConnect`). An empty role fails the run; never add a fallback to the
+  login's own identity, or objects end up owned by the migrator.
+  `BuildDSN()` stays the single source for both.
+- **A new table needs no GRANT.** `000002_authorization` sets the owner's
+  default privileges, so every table and sequence a later migration creates is
+  usable by `user_runtime`. It names `user_runtime` on purpose: the platform
+  creates the roles before migrations run, and a missing role must fail. A
+  function the runtime calls directly is the exception: PUBLIC has no EXECUTE
+  by default, so that migration grants EXECUTE explicitly.
+- **The platform owns the roles and the database owner.** `user_owner` must own
+  the `user` database (on PostgreSQL 15+ that is what gives it CREATE on
+  `public`), and `migrate`/`seed` must connect to the primary directly:
+  `SET ROLE` is session state that a transaction pooler would not keep. `user`
+  is a reserved word, so quote the database name (`"user"`) in SQL.
 - **`seed` is development-only** and refuses production. It is invoked explicitly
   — never from `migrate` or the serve path — and must not use golang-migrate:
   seeds are idempotent `ON CONFLICT` statements and must not share the

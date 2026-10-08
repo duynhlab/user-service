@@ -14,7 +14,7 @@ func clearEnv(t *testing.T) {
 		"PROFILING_ENABLED", "PYROSCOPE_ENDPOINT",
 		"LOG_LEVEL", "LOG_FORMAT",
 		"DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD", "DB_SSLMODE",
-		"DB_POOL_MAX_CONNECTIONS", "DB_POOL_MODE", "DB_POOLER_TYPE",
+		"DB_POOL_MAX_CONNECTIONS", "DB_POOL_MODE", "DB_POOLER_TYPE", "DB_MIGRATION_ROLE",
 		"SHUTDOWN_TIMEOUT", "READINESS_DRAIN_DELAY",
 		"OIDC_ISSUER", "OIDC_AUDIENCE", "OIDC_JWKS_URL",
 	} {
@@ -43,6 +43,9 @@ func TestLoadDefaults(t *testing.T) {
 	if c.ReadinessDrainDelay != 5 {
 		t.Errorf("ReadinessDrainDelay = %d, want 5", c.ReadinessDrainDelay)
 	}
+	if c.Database.MigrationRole != "" {
+		t.Errorf("default MigrationRole = %q, want empty (migrate then fails)", c.Database.MigrationRole)
+	}
 }
 
 func TestLoadFromEnv(t *testing.T) {
@@ -54,6 +57,7 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("OTEL_SAMPLE_RATE", "0.5")
 	t.Setenv("SHUTDOWN_TIMEOUT", "20s")
 	t.Setenv("READINESS_DRAIN_DELAY", "999s") // over max(30) -> default 5
+	t.Setenv("DB_MIGRATION_ROLE", "user_owner")
 	c := Load()
 	if c.Service.Name != "user" || c.Service.Port != "9000" || c.Service.Env != "production" {
 		t.Errorf("service = %+v", c.Service)
@@ -69,6 +73,9 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 	if c.ReadinessDrainDelay != 5 {
 		t.Errorf("ReadinessDrainDelay = %d, want 5 (over-max falls back)", c.ReadinessDrainDelay)
+	}
+	if c.Database.MigrationRole != "user_owner" {
+		t.Errorf("MigrationRole = %q, want user_owner", c.Database.MigrationRole)
 	}
 }
 

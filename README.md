@@ -37,12 +37,19 @@ change when they change.
 Prefer the homelab **local-stack** — the private routes need a signed token, so
 auth-service has to be running.
 
-Standalone you need PostgreSQL reachable through the `DB_*` variables:
+Standalone you need PostgreSQL reachable through the `DB_*` variables and three
+roles: `user_owner` (owns the schema, cannot log in), `user_migrator` (logs in,
+may only `SET ROLE user_owner`) and `user_runtime` (serves traffic, CRUD only).
+`migrate` and `seed` log in as the migrator and need
+`DB_MIGRATION_ROLE=user_owner`; they refuse to run without it, and they must
+reach PostgreSQL directly, not through a transaction pooler. The app logs in as
+`user_runtime`. `user_owner` must own the `user` database: on PostgreSQL 15+
+that is what lets it create objects in the `public` schema.
 
 ```bash
-go run cmd/main.go migrate   # apply schema migrations
-go run cmd/main.go seed      # demo profiles — development only, refuses production
-go run cmd/main.go           # serve HTTP :8080
+DB_USER=user_migrator DB_MIGRATION_ROLE=user_owner go run cmd/main.go migrate
+DB_USER=user_migrator DB_MIGRATION_ROLE=user_owner go run cmd/main.go seed   # development only
+DB_USER=user_runtime go run cmd/main.go   # serve HTTP :8080
 ```
 
 ## Verify
