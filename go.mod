@@ -8,7 +8,7 @@ require (
 	github.com/duynhlab/pkg/httpmw v0.4.0
 	github.com/duynhlab/pkg/httpx v0.38.0
 	github.com/duynhlab/pkg/logger/slogx v0.4.0
-	github.com/duynhlab/pkg/migratex v0.37.0
+	github.com/duynhlab/pkg/migratex v0.38.0
 	github.com/duynhlab/pkg/obsx v0.48.0
 	github.com/gin-gonic/gin v1.12.0
 	github.com/jackc/pgx/v5 v5.11.0
